@@ -76,7 +76,7 @@ const Screen = struct {
         for (self.chars) |row| {
             std.debug.print("│", .{});
             for (row) |c| {
-                std.debug.print("{s}{s}{s}", .{ c.color.*, c.data, CHAR_COLOR_RESET.* });
+                std.debug.print("{s}{s}{s}", .{ c.color.*, c.data, color.RESET.* });
             }
             std.debug.print("│\n", .{});
         }

@@ -30,12 +30,37 @@ const vec2 = struct {
     }
 };
 
+const MAX_CHAR_SIZE: usize = 8;
+
+const CHAR_FULL: [MAX_CHAR_SIZE]u8 = blk: {
+    var result: [MAX_CHAR_SIZE]u8 = undefined;
+    @memset(&result, 0);
+    result[0] = 0xe2;
+    result[1] = 0x96;
+    result[2] = 0x88;
+    break :blk result;
+};
+
+const Char = struct {
+    data: [MAX_CHAR_SIZE]u8 = blk: {
+        var result: [MAX_CHAR_SIZE]u8 = undefined;
+        @memset(&result, 0);
+        result[0] = ' ';
+        break :blk result;
+    },
+
+    fn init(c: *const [MAX_CHAR_SIZE]u8) Char {
+        var char = Char{};
+        @memcpy(&char.data, c);
+        return char;
+    }
+};
+
 const Screen = struct {
-    chars: [SCREEN_HEIGHT][SCREEN_WIDTH]u8 = blk: {
-        var result: [SCREEN_HEIGHT][SCREEN_WIDTH]u8 = undefined;
-        for (&result) |*row| {
-            @memset(row, SCREEN_DEFAULT_CHAR);
-        }
+    chars: [SCREEN_HEIGHT][SCREEN_WIDTH]Char = blk: {
+        const default_char = Char{};
+        const default_row: [SCREEN_WIDTH]Char = .{default_char} ** SCREEN_WIDTH;
+        const result: [SCREEN_HEIGHT][SCREEN_WIDTH]Char = .{default_row} ** SCREEN_HEIGHT;
         break :blk result;
     },
 
@@ -46,7 +71,11 @@ const Screen = struct {
         }
         std.debug.print("┐\n", .{});
         for (self.chars) |row| {
-            std.debug.print("│{s}│\n", .{row});
+            std.debug.print("│", .{});
+            for (row) |c| {
+                std.debug.print("{s}", .{c.data});
+            }
+            std.debug.print("│\n", .{});
         }
         std.debug.print("└", .{});
         for (0..SCREEN_WIDTH) |_| {
@@ -55,7 +84,7 @@ const Screen = struct {
         std.debug.print("┘\n", .{});
     }
 
-    fn fill_y(self: *Screen, start: vec2i, length: usize, fill: comptime_int) void {
+    fn fill_y(self: *Screen, start: vec2i, length: usize, fill: Char) void {
         const y0: usize = @intCast(start.y);
         const xx: usize = @intCast(start.x);
         //std.debug.print("y0: {}, xx: {}, length: {}\n", .{ y0, xx, length });
@@ -66,7 +95,7 @@ const Screen = struct {
         }
     }
 
-    fn draw_line(self: *Screen, start: vec2i, end: vec2i) void {
+    fn draw_line(self: *Screen, start: vec2i, end: vec2i, fill: Char) void {
         // std.debug.print("<-- drawing line -->\n", .{});
 
         var _start: vec2i = vec2i{ .x = 0, .y = 0 };
@@ -74,9 +103,9 @@ const Screen = struct {
         if (start.x == end.x) {
             const l = start.y - end.y;
             if (start.y < end.y) {
-                self.fill_y(start, @abs(l), 'X');
+                self.fill_y(start, @abs(l), fill);
             } else {
-                self.fill_y(end, @abs(l), 'X');
+                self.fill_y(end, @abs(l), fill);
             }
             return;
         } else if (start.x > end.x) {
@@ -103,20 +132,20 @@ const Screen = struct {
             if ((xx < SCREEN_WIDTH) and (yy < SCREEN_HEIGHT)) {
                 //  std.debug.print("setting ({},{})\n", .{ xx, yy });
                 //self.chars[yy][xx] = 'x';
-                self.fill_y(p.to_int(), @intFromFloat(@abs(dydx)), 'X');
+                self.fill_y(p.to_int(), @intFromFloat(@abs(dydx)), fill);
             }
             p.x += 1;
             p.y += dydx;
         }
-        self.fill_y(p.to_int(), @intFromFloat(@abs(dydx)), 'X');
+        self.fill_y(p.to_int(), @intFromFloat(@abs(dydx)), fill);
     }
 };
 
 pub fn main() !void {
     var screen = Screen{};
-    screen.draw_line(vec2i{ .x = 16, .y = 16 }, vec2i{ .x = 32, .y = 32 });
-    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 25, .y = 25 });
-    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 50, .y = 0 });
+    screen.draw_line(vec2i{ .x = 16, .y = 16 }, vec2i{ .x = 32, .y = 32 }, Char.init(&CHAR_FULL));
+    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 25, .y = 25 }, Char.init(&CHAR_FULL));
+    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 50, .y = 0 }, Char.init(&CHAR_FULL));
     screen.print();
 }
 

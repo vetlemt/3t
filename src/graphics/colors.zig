@@ -1,0 +1,9 @@
+pub const RED = "\x1B[0;31m";
+pub const BLACK = "\x1B[0;30m";
+pub const GREEN = "\x1B[0;32m";
+pub const YELLOW = "\x1B[0;33m";
+pub const BLUE = "\x1B[0;34m";
+pub const PURPLE = "\x1B[0;35m";
+pub const CYAN = "\x1B[0;36m";
+pub const WHITE = "\x1B[0;37m";
+pub const RESET = "\x1B[0m";

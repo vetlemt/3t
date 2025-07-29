@@ -1,0 +1,20 @@
+{
+  "languages": {
+    "Zig": {
+      "language_servers": ["zls", "..."],
+      "format_on_save": "language_server",
+      "code_actions_on_format": {
+        "source.fixAll": true,
+        "source.organizeImports": true
+      }
+    }
+  },
+  "lsp": {
+    "zls": {
+      "settings": {
+        "zig_exe_path": "/usr/local/zig-0.14/zig",
+        "zig_lib_path": "/usr/local/zig-0.14/lib"
+      }
+    }
+  }
+}

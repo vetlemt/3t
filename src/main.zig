@@ -41,6 +41,16 @@ const CHAR_FULL: [MAX_CHAR_SIZE]u8 = blk: {
     break :blk result;
 };
 
+const CHAR_COLOR_RED = "\x1B[0;31m";
+const CHAR_COLOR_BLACK = "\x1B[0;30m";
+const CHAR_COLOR_GREEN = "\x1B[0;32m";
+const CHAR_COLOR_YELLOW = "\x1B[0;33m";
+const CHAR_COLOR_BLUE = "\x1B[0;34m";
+const CHAR_COLOR_PURPLE = "\x1B[0;35m";
+const CHAR_COLOR_CYAN = "\x1B[0;36m";
+const CHAR_COLOR_WHITE = "\x1B[0;37m";
+const CHAR_COLOR_RESET = "\x1B[0m";
+
 const Char = struct {
     data: [MAX_CHAR_SIZE]u8 = blk: {
         var result: [MAX_CHAR_SIZE]u8 = undefined;
@@ -48,10 +58,12 @@ const Char = struct {
         result[0] = ' ';
         break :blk result;
     },
+    color: *const []const u8 = &CHAR_COLOR_WHITE[0..CHAR_COLOR_WHITE.len],
 
-    fn init(c: *const [MAX_CHAR_SIZE]u8) Char {
+    fn init(c: *const [MAX_CHAR_SIZE]u8, color: *const []const u8) Char {
         var char = Char{};
         @memcpy(&char.data, c);
+        char.color = color;
         return char;
     }
 };
@@ -73,7 +85,7 @@ const Screen = struct {
         for (self.chars) |row| {
             std.debug.print("│", .{});
             for (row) |c| {
-                std.debug.print("{s}", .{c.data});
+                std.debug.print("{s}{s}{s}", .{ c.color.*, c.data, CHAR_COLOR_RESET.* });
             }
             std.debug.print("│\n", .{});
         }
@@ -143,9 +155,9 @@ const Screen = struct {
 
 pub fn main() !void {
     var screen = Screen{};
-    screen.draw_line(vec2i{ .x = 16, .y = 16 }, vec2i{ .x = 32, .y = 32 }, Char.init(&CHAR_FULL));
-    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 25, .y = 25 }, Char.init(&CHAR_FULL));
-    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 50, .y = 0 }, Char.init(&CHAR_FULL));
+    screen.draw_line(vec2i{ .x = 16, .y = 16 }, vec2i{ .x = 32, .y = 32 }, Char.init(&CHAR_FULL, &CHAR_COLOR_RED[0..CHAR_COLOR_RED.len]));
+    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 25, .y = 25 }, Char.init(&CHAR_FULL, &CHAR_COLOR_BLUE[0..CHAR_COLOR_BLUE.len]));
+    screen.draw_line(vec2i{ .x = 25, .y = 0 }, vec2i{ .x = 50, .y = 0 }, Char.init(&CHAR_FULL, &CHAR_COLOR_GREEN[0..CHAR_COLOR_GREEN.len]));
     screen.print();
 }
 

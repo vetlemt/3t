@@ -5,6 +5,8 @@ const DATA_UPPER = "▀";
 const DATA_LEFT = "▌";
 const DATA_RIGHT = "▐";
 
+pub const Pointer = *const []const u8;
+
 pub const NONE: *const []const u8 = &DATA_NONE[0..DATA_NONE.len];
 pub const FULL: *const []const u8 = &DATA_FULL[0..DATA_FULL.len];
 pub const LOWER: *const []const u8 = &DATA_LOWER[0..DATA_LOWER.len];

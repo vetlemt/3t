@@ -8,6 +8,8 @@ const DATA_CYAN = "\x1B[0;36m";
 const DATA_WHITE = "\x1B[0;37m";
 const DATA_RESET = "\x1B[0m";
 
+pub const Type = *const []const u8;
+
 pub const RED: *const []const u8 = &DATA_RED[0..DATA_RED.len];
 pub const BLACK: *const []const u8 = &DATA_BLACK[0..DATA_BLACK.len];
 pub const GREEN: *const []const u8 = &DATA_GREEN[0..DATA_GREEN.len];

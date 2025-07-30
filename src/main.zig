@@ -3,34 +3,17 @@ const std = @import("std");
 const _3t = @import("_3t");
 const char = @import("chars");
 const color = @import("colors");
+const polygon = @import("polygon");
+const Polygon = polygon.Polygon;
+const quaternion = @import("quaternions");
+const vectors = @import("vectors");
+const vec2i = vectors.vec2i;
+const vec2 = vectors.vec2;
+const vec3 = vectors.vec3;
 
 const SCREEN_WIDTH: u32 = 50;
 const SCREEN_HEIGHT: u32 = 25;
 const SCREEN_DEFAULT_CHAR: u8 = ' ';
-
-const vec2i = struct {
-    x: i64,
-    y: i64,
-};
-
-const vec2 = struct {
-    x: f64,
-    y: f64,
-
-    fn from(v2i: vec2i) vec2 {
-        return vec2{
-            .x = @as(f64, @floatFromInt(v2i.x)),
-            .y = @as(f64, @floatFromInt(v2i.y)),
-        };
-    }
-
-    fn to_int(self: *vec2) vec2i {
-        return vec2i{
-            .x = @as(i64, @intFromFloat(self.x)),
-            .y = @as(i64, @intFromFloat(self.y)),
-        };
-    }
-};
 
 const Edge = struct {
     atoms: std.ArrayList(vec2i),
@@ -38,7 +21,7 @@ const Edge = struct {
     fn fill_y(self: *Edge, start: vec2i, length: usize) !void {
         const y0: usize = @intCast(start.y);
         const xx: i64 = start.x;
-        std.debug.print("y0: {}, xx: {}, length: {}\n", .{ y0, xx, length });
+        //std.debug.print("y0: {}, xx: {}, length: {}\n", .{ y0, xx, length });
         for (y0..(y0 + length)) |y| {
             const yy: i64 = @intCast(y);
             try self.atoms.append(.{ .x = xx, .y = yy });
@@ -92,8 +75,9 @@ const Edge = struct {
         var last_filled_y: usize = 0;
         while (p.x <= last_x) {
             i += 1;
-            const xx: usize = @intFromFloat(std.math.round(p.x));
-            const yy: usize = @intFromFloat(std.math.round(p.y));
+            //std.debug.print("p.x {}\n", .{p.x});
+            const xx: usize = @intFromFloat(@abs(std.math.round(p.x)));
+            const yy: usize = @intFromFloat(@abs(std.math.round(p.y)));
 
             if ((xx < SCREEN_WIDTH) and (yy < SCREEN_HEIGHT)) {
                 if (last_filled_y == 0) {
@@ -185,16 +169,16 @@ const Screen = struct {
 
     fn emplace(self: *Screen, items: std.ArrayList(vec2i), fill: Char) void {
         for (items.items) |*item| {
-            const xx: usize = @intCast(item.x);
-            const yy: usize = @intCast(item.y);
-            if ((xx < SCREEN_WIDTH) and (yy < SCREEN_HEIGHT)) {
+            if ((item.x < SCREEN_WIDTH) and (item.x > 0) and (item.y < SCREEN_HEIGHT) and (item.y > 0)) {
+                const xx: usize = @intCast(item.x);
+                const yy: usize = @intCast(item.y);
                 self.chars[yy][xx] = fill;
             }
         }
     }
 
     fn draw_line_double(self: *Screen, start: vec2i, end: vec2i, col: color.Type) !void {
-        std.debug.print("<-- drawing line -->\n", .{});
+        //std.debug.print("<-- drawing line -->\n", .{});
         const fill = Char.init(char.FULL, col);
 
         const allocator = std.heap.page_allocator;
@@ -205,7 +189,7 @@ const Screen = struct {
     }
 
     fn draw_surface(self: *Screen, vertecies: std.ArrayList(vec2i), col: color.Type) !void {
-        std.debug.print("<-- drawing surface -->\n", .{});
+        //std.debug.print("<-- drawing surface -->\n", .{});
         const fill = Char.init(char.FULL, col);
 
         const allocator = std.heap.page_allocator;
@@ -213,11 +197,11 @@ const Screen = struct {
         defer edges.deinit();
 
         for (1..vertecies.items.len) |i| {
-            std.debug.print("<-- drawing surface edge -->\n", .{});
+            //std.debug.print("<-- drawing surface edge -->\n", .{});
             const e = try Edge.init(vertecies.items[i - 1], vertecies.items[i], allocator);
             try edges.append(e);
         }
-        std.debug.print("<-- drawing surface edge -->\n", .{});
+        //std.debug.print("<-- drawing surface edge -->\n", .{});
         const e = try Edge.init(vertecies.items[vertecies.items.len - 1], vertecies.items[0], allocator);
         try edges.append(e);
 
@@ -228,7 +212,22 @@ const Screen = struct {
             if (v.y < min_y) min_y = v.y;
         }
 
-        for (@intCast(min_y)..@intCast(max_y + 1)) |y| {
+        const first_y: usize =
+            if (min_y < 0)
+                0
+            else if (min_y > SCREEN_HEIGHT)
+                SCREEN_HEIGHT - 1
+            else
+                @intCast(min_y);
+        const last_y: usize =
+            if (max_y < 0)
+                0
+            else if (max_y > SCREEN_HEIGHT)
+                SCREEN_HEIGHT - 1
+            else
+                @intCast(max_y);
+
+        for (first_y..last_y) |y| {
             var intersections = std.ArrayList(i64).init(allocator);
             defer intersections.deinit();
 
@@ -277,24 +276,34 @@ pub fn main() !void {
     var screen = Screen{};
 
     const allocator = std.heap.page_allocator;
-    var surface = std.ArrayList(vec2i).init(allocator);
+    var surface = std.ArrayList(vec3).init(allocator);
     defer surface.deinit();
-    try surface.append(.{ .x = 9, .y = 6 });
-    try surface.append(.{ .x = 13, .y = 6 });
-    try surface.append(.{ .x = 25, .y = 8 });
-    try surface.append(.{ .x = 35, .y = 6 });
-    try surface.append(.{ .x = 38, .y = 6 });
-    try surface.append(.{ .x = 49, .y = 13 });
-    try surface.append(.{ .x = 25, .y = 24 });
-    try surface.append(.{ .x = 0, .y = 13 });
+    try surface.append(.{ .x = 9, .y = 6, .z = 2 });
+    try surface.append(.{ .x = 13, .y = 6, .z = 2 });
+    try surface.append(.{ .x = 25, .y = 8, .z = 2 });
+    try surface.append(.{ .x = 35, .y = 6, .z = 2 });
+    try surface.append(.{ .x = 38, .y = 6, .z = 2 });
+    try surface.append(.{ .x = 49, .y = 13, .z = 2 });
+    try surface.append(.{ .x = 25, .y = 24, .z = 2 });
+    try surface.append(.{ .x = 0, .y = 13, .z = 2 });
 
-    try screen.draw_surface(surface, color.WHITE);
+    var heart = Polygon.init(surface, color.RED, .{ .x = 50, .y = 0, .z = -100 }, quaternion.Quaternion{});
+
+    while (true) {
+        const t = std.time.milliTimestamp();
+        heart.transform(@floatFromInt(t));
+        const vert = try heart.projection(allocator);
+        defer vert.deinit();
+
+        try screen.draw_surface(vert, heart.color);
+        screen.print();
+        std.time.sleep(1_000_000_000);
+    }
 
     //try screen.draw_line_double(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, color.RED);
     //try screen.draw_line_double(.{ .x = 25, .y = 0 }, .{ .x = 25, .y = 25 }, color.BLUE);
     //try screen.draw_line_double(.{ .x = 25, .y = 0 }, .{ .x = 50, .y = 0 }, color.GREEN);
 
-    screen.print();
 }
 
 test "simple test" {

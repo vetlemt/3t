@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const _3t = @import("_3t");
+const char = @import("chars");
 const color = @import("colors");
 
 const SCREEN_WIDTH: u32 = 50;
@@ -33,29 +34,15 @@ const vec2 = struct {
 
 const MAX_CHAR_SIZE: usize = 8;
 
-const CHAR_FULL: [MAX_CHAR_SIZE]u8 = blk: {
-    var result: [MAX_CHAR_SIZE]u8 = undefined;
-    @memset(&result, 0);
-    result[0] = 0xe2;
-    result[1] = 0x96;
-    result[2] = 0x88;
-    break :blk result;
-};
-
 const Char = struct {
-    data: [MAX_CHAR_SIZE]u8 = blk: {
-        var result: [MAX_CHAR_SIZE]u8 = undefined;
-        @memset(&result, 0);
-        result[0] = ' ';
-        break :blk result;
-    },
+    data: *const []const u8 = char.NONE,
     color: *const []const u8 = color.WHITE,
 
-    fn init(c: *const [MAX_CHAR_SIZE]u8, col: *const []const u8) Char {
-        var char = Char{};
-        @memcpy(&char.data, c);
-        char.color = col;
-        return char;
+    fn init(character: *const []const u8, col: *const []const u8) Char {
+        var c: Char = undefined;
+        c.data = character;
+        c.color = col;
+        return c;
     }
 };
 
@@ -76,7 +63,7 @@ const Screen = struct {
         for (self.chars) |row| {
             std.debug.print("│", .{});
             for (row) |c| {
-                std.debug.print("{s}{s}{s}", .{ c.color.*, c.data, color.RESET.* });
+                std.debug.print("{s}{s}{s}", .{ c.color.*, c.data.*, color.RESET.* });
             }
             std.debug.print("│\n", .{});
         }
@@ -98,7 +85,8 @@ const Screen = struct {
         }
     }
 
-    fn draw_line(self: *Screen, start: vec2i, end: vec2i, fill: Char) void {
+    fn draw_line_double(self: *Screen, start: vec2i, end: vec2i, col: *const []const u8) void {
+        const fill = Char.init(char.FULL, col);
         // std.debug.print("<-- drawing line -->\n", .{});
 
         var _start: vec2i = vec2i{ .x = 0, .y = 0 };
@@ -136,7 +124,6 @@ const Screen = struct {
             //std.debug.print("{}: ({},{})\n", .{ i, xx, yy });
             if ((xx < SCREEN_WIDTH) and (yy < SCREEN_HEIGHT)) {
                 //  std.debug.print("setting ({},{})\n", .{ xx, yy });
-                //self.chars[yy][xx] = 'x';
                 self.fill_y(p.to_int(), @intFromFloat(@abs(dydx)), fill);
             }
             p.x += 1;
@@ -148,9 +135,9 @@ const Screen = struct {
 
 pub fn main() !void {
     var screen = Screen{};
-    screen.draw_line(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, Char.init(&CHAR_FULL, color.RED));
-    screen.draw_line(.{ .x = 25, .y = 0 }, .{ .x = 25, .y = 25 }, Char.init(&CHAR_FULL, color.BLUE));
-    screen.draw_line(.{ .x = 25, .y = 0 }, .{ .x = 50, .y = 0 }, Char.init(&CHAR_FULL, color.GREEN));
+    screen.draw_line_double(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, color.RED);
+    screen.draw_line_double(.{ .x = 25, .y = 0 }, .{ .x = 25, .y = 25 }, color.BLUE);
+    screen.draw_line_double(.{ .x = 25, .y = 0 }, .{ .x = 50, .y = 0 }, color.GREEN);
     screen.print();
 }
 

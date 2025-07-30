@@ -80,6 +80,7 @@ pub fn build(b: *std.Build) void {
                 // importing modules from different packages).
                 .{ .name = "_3t", .module = mod },
                 .{ .name = "colors", .module = b.addModule("colors", .{ .root_source_file = b.path("src/graphics/colors.zig"), .target = target }) },
+                .{ .name = "chars", .module = b.addModule("chars", .{ .root_source_file = b.path("src/graphics/chars.zig"), .target = target }) },
             },
         }),
     });

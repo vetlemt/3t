@@ -19,7 +19,13 @@ const Edge = struct {
     atoms: std.ArrayList(vec2i),
 
     fn fill_y(self: *Edge, start: vec2i, length: usize) !void {
-        const y0: usize = @intCast(start.y);
+        const y0: usize =
+            if (start.y < 0)
+                0
+            else if (start.y > SCREEN_HEIGHT)
+                SCREEN_HEIGHT - 1
+            else
+                @intCast(start.y);
         const xx: i64 = start.x;
         //std.debug.print("y0: {}, xx: {}, length: {}\n", .{ y0, xx, length });
         for (y0..(y0 + length)) |y| {
@@ -124,6 +130,14 @@ const Screen = struct {
         const result: [SCREEN_HEIGHT][SCREEN_WIDTH]Char = .{default_row} ** SCREEN_HEIGHT;
         break :blk result;
     },
+
+    fn clear(self: *Screen) void {
+        for (0..SCREEN_HEIGHT) |i| {
+            for (0..SCREEN_WIDTH) |j| {
+                self.chars[i][j].data = char.NONE;
+            }
+        }
+    }
 
     fn print(self: *const Screen) void {
         std.debug.print("┌", .{});
@@ -290,13 +304,14 @@ pub fn main() !void {
     var heart = Polygon.init(surface, color.RED, .{ .x = 50, .y = 0, .z = -100 }, quaternion.Quaternion{});
 
     while (true) {
-        const t = std.time.milliTimestamp();
+        const t = std.time.microTimestamp();
         heart.transform(@floatFromInt(t));
         const vert = try heart.projection(allocator);
         defer vert.deinit();
 
         try screen.draw_surface(vert, heart.color);
         screen.print();
+        screen.clear();
         std.time.sleep(1_000_000_000);
     }
 

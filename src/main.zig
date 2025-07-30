@@ -49,7 +49,7 @@ const Char = struct {
         result[0] = ' ';
         break :blk result;
     },
-    color: *const []const u8 = &color.WHITE[0..color.WHITE.len],
+    color: *const []const u8 = color.WHITE,
 
     fn init(c: *const [MAX_CHAR_SIZE]u8, col: *const []const u8) Char {
         var char = Char{};
@@ -148,9 +148,9 @@ const Screen = struct {
 
 pub fn main() !void {
     var screen = Screen{};
-    screen.draw_line(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, Char.init(&CHAR_FULL, &color.RED[0..color.RED.len]));
-    screen.draw_line(.{ .x = 25, .y = 0 }, .{ .x = 25, .y = 25 }, Char.init(&CHAR_FULL, &color.BLUE[0..color.BLUE.len]));
-    screen.draw_line(.{ .x = 25, .y = 0 }, .{ .x = 50, .y = 0 }, Char.init(&CHAR_FULL, &color.GREEN[0..color.GREEN.len]));
+    screen.draw_line(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, Char.init(&CHAR_FULL, color.RED));
+    screen.draw_line(.{ .x = 25, .y = 0 }, .{ .x = 25, .y = 25 }, Char.init(&CHAR_FULL, color.BLUE));
+    screen.draw_line(.{ .x = 25, .y = 0 }, .{ .x = 50, .y = 0 }, Char.init(&CHAR_FULL, color.GREEN));
     screen.print();
 }
 

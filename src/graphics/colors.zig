@@ -7,6 +7,7 @@ const DATA_PURPLE = "\x1B[0;35m";
 const DATA_CYAN = "\x1B[0;36m";
 const DATA_WHITE = "\x1B[0;37m";
 const DATA_RESET = "\x1B[0m";
+const DATA_CLEAR = "\x1B[2J";
 
 pub const Type = *const []const u8;
 
@@ -18,4 +19,6 @@ pub const BLUE: *const []const u8 = &DATA_BLUE[0..DATA_BLUE.len];
 pub const PURPLE: *const []const u8 = &DATA_PURPLE[0..DATA_PURPLE.len];
 pub const CYAN: *const []const u8 = &DATA_CYAN[0..DATA_CYAN.len];
 pub const WHITE: *const []const u8 = &DATA_WHITE[0..DATA_WHITE.len];
+
 pub const RESET: *const []const u8 = &DATA_RESET[0..DATA_RESET.len];
+pub const CLEAR: *const []const u8 = &DATA_CLEAR[0..DATA_CLEAR.len];

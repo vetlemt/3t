@@ -61,9 +61,9 @@ pub const Polygon = struct {
         const w: f64 = time * std.math.pi / 5000.0;
         for (self.vertices.items) |*v| {
             const r = self.q.rotate_point(v.*, w);
-            v.x = r.x + self.offset.x;
-            v.y = r.y + self.offset.y;
-            v.z = r.z + self.offset.z;
+            v.x = r.x; //+ self.offset.x;
+            v.y = r.y; //+ self.offset.y;
+            v.z = r.z; //+ self.offset.z;
         }
     }
 };

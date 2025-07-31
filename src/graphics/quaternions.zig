@@ -7,9 +7,9 @@ const vec3 = vectors.vec3;
 
 pub const Quaternion = struct {
     a: f64 = 0,
-    b: f64 = 1,
+    b: f64 = 0,
     c: f64 = 1,
-    d: f64 = 1,
+    d: f64 = 0,
 
     pub fn init(a: f64, b: f64, c: f64, d: f64) Quaternion {
         return .{ .a = a, .b = b, .c = c, .d = d };
@@ -61,7 +61,12 @@ pub fn sum(q: Quaternion, p: Quaternion) Quaternion {
 }
 
 pub fn product(q: Quaternion, p: Quaternion) Quaternion {
-    return Quaternion.init((q.a * p.a) - (q.b * p.b) - (q.c * p.c) - (q.d * p.d), (q.a * p.b) + (q.b * p.a) + (q.c * p.d) - (q.d * p.c), (q.a * p.c) - (q.b * p.d) + (q.c * p.a) + (q.d * p.b), (q.a * p.d) + (q.b * p.c) - (q.c * p.b) - (q.d * p.a));
+    return Quaternion.init(
+        (q.a * p.a) - (q.b * p.b) - (q.c * p.c) - (q.d * p.d),
+        (q.a * p.b) + (q.b * p.a) + (q.c * p.d) - (q.d * p.c),
+        (q.a * p.c) - (q.b * p.d) + (q.c * p.a) + (q.d * p.b),
+        (q.a * p.d) + (q.b * p.c) - (q.c * p.b) + (q.d * p.a),
+    );
 }
 
 pub fn scale(q: Quaternion, alpha: f64) Quaternion {

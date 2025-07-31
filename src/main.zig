@@ -11,11 +11,13 @@ const vec2i = vectors.vec2i;
 const vec2 = vectors.vec2;
 const vec3 = vectors.vec3;
 
-const SCREEN_WIDTH: u32 = 50;
-const SCREEN_HEIGHT: u32 = 25;
+const SCREEN_WIDTH: u32 = 64;
+const SCREEN_HEIGHT: u32 = 32;
 const SCREEN_DEFAULT_CHAR: u8 = ' ';
 
 const Edge = struct {
+    start: vec2i,
+    end: vec2i,
     atoms: std.ArrayList(vec2i),
 
     fn fill_y(self: *Edge, start: vec2i, length: usize) !void {
@@ -40,68 +42,59 @@ const Edge = struct {
 
     fn init(start: vec2i, end: vec2i, allocator: std.mem.Allocator) !Edge {
         var edge: Edge = undefined;
-
+        edge.start = start;
+        edge.end = end;
         edge.atoms = std.ArrayList(vec2i).init(allocator);
 
-        var _start: vec2i = vec2i{ .x = 0, .y = 0 };
-        var _end: vec2i = vec2i{ .x = 0, .y = 0 };
-        // HORIZONTAL LINE
-        if (start.y == end.y) {
-            try edge.atoms.append(start);
-            try edge.atoms.append(end);
-            return edge;
+        var x0: i64 = start.x;
+        var y0: i64 = start.y;
+        var x1: i64 = end.x;
+        var y1: i64 = end.y;
+
+        const steep = @abs(y1 - y0) > @abs(x1 - x0);
+        if (steep) {
+            std.mem.swap(i64, &x0, &y0);
+            std.mem.swap(i64, &x1, &y1);
         }
 
-        // VERTICAL LINE
-        if (start.x == end.x) {
-            const l = @abs(start.y - end.y);
-            if (start.y < end.y) {
-                try edge.fill_y(start, l);
-            } else {
-                try edge.fill_y(end, l);
+        if (x0 > x1) {
+            std.mem.swap(i64, &x0, &x1);
+            std.mem.swap(i64, &y0, &y1);
+        }
+
+        const dx: i64 = x1 - x0;
+        const dy: i64 = @intCast(@abs(y1 - y0));
+        var err: i64 = @divTrunc(dx, 2);
+        const ystep: i64 = if (y0 < y1) 1 else -1;
+        var y: i64 = y0;
+
+        var x: i64 = x0;
+        while (x <= x1) : (x += 1) {
+            const px = if (steep) y else x;
+            const py = if (steep) x else y;
+            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT) {
+                try edge.atoms.append(.{ .x = px, .y = py });
             }
-            return edge;
-        }
-
-        //  DIAGONAL LINE
-        if (start.x > end.x) {
-            _start = end;
-            _end = start;
-        } else {
-            _start = start;
-            _end = end;
-        }
-
-        const line = vec2i{ .x = _end.x - _start.x, .y = _end.y - _start.y };
-        const dydx: f64 = @as(f64, @floatFromInt(line.y)) / @as(f64, @floatFromInt(line.x));
-        var p = vec2.from(_start);
-
-        const last_x: f64 = @floatFromInt(_end.x);
-        var i: i32 = 0;
-        var last_filled_y: usize = 0;
-        while (p.x <= last_x) {
-            i += 1;
-            //std.debug.print("p.x {}\n", .{p.x});
-            const xx: usize = @intFromFloat(@abs(std.math.round(p.x)));
-            const yy: usize = @intFromFloat(@abs(std.math.round(p.y)));
-
-            if ((xx < SCREEN_WIDTH) and (yy < SCREEN_HEIGHT)) {
-                if (last_filled_y == 0) {
-                    last_filled_y = yy;
-                    try edge.fill_y(.{ .x = @intCast(xx), .y = @intCast(yy) }, 1);
-                } else if (yy != last_filled_y) {
-                    last_filled_y = yy;
-                    const length: usize = @intFromFloat(@abs(dydx) + 1);
-                    try edge.fill_y(.{ .x = @intCast(xx), .y = @intCast(yy) }, length);
-                }
+            err -= dy;
+            if (err < 0) {
+                y += ystep;
+                err += dx;
             }
-            p.x += 1;
-            p.y += dydx;
         }
+
+        std.sort.heap(vec2i, edge.atoms.items, {}, struct {
+            pub fn lessThan(_: void, a: vec2i, b: vec2i) bool {
+                if (a.y != b.y) return a.y < b.y;
+                return a.x < b.x;
+            }
+        }.lessThan);
+
         return edge;
     }
 
     fn intersects(self: *const Edge, y: i64) ?i64 {
+        if (self.start.y == self.end.y) return null;
+        //        std.sort.binarySearch(vec2i, self.atoms.items, {}, comptime compareFn: fn(@TypeOf(context), T)std.math.Order)
         for (self.atoms.items) |atom| {
             if (atom.y == y) return atom.x;
         }
@@ -140,6 +133,7 @@ const Screen = struct {
     }
 
     fn print(self: *const Screen) void {
+        //std.debug.print(color.CLEAR.*, .{});
         std.debug.print("┌", .{});
         for (0..SCREEN_WIDTH) |_| {
             std.debug.print("─", .{});
@@ -282,7 +276,7 @@ const Screen = struct {
             self.emplace(edge.atoms, Char.init(char.FULL, color.PURPLE));
             edge.deinit();
         }
-        //self.emplace(vertecies, Char.init(char.FULL, color.RED));
+        self.emplace(vertecies, Char.init(char.FULL, color.GREEN));
     }
 };
 
@@ -292,27 +286,25 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
     var surface = std.ArrayList(vec3).init(allocator);
     defer surface.deinit();
-    try surface.append(.{ .x = 9, .y = 6, .z = 2 });
-    try surface.append(.{ .x = 13, .y = 6, .z = 2 });
-    try surface.append(.{ .x = 25, .y = 8, .z = 2 });
-    try surface.append(.{ .x = 35, .y = 6, .z = 2 });
-    try surface.append(.{ .x = 38, .y = 6, .z = 2 });
-    try surface.append(.{ .x = 49, .y = 13, .z = 2 });
-    try surface.append(.{ .x = 25, .y = 24, .z = 2 });
-    try surface.append(.{ .x = 0, .y = 13, .z = 2 });
+    try surface.append(.{ .x = -10, .y = -10, .z = 0 });
+    try surface.append(.{ .x = -10, .y = 10, .z = 0 });
+    try surface.append(.{ .x = 10, .y = 10, .z = 0 });
+    try surface.append(.{ .x = 10, .y = -10, .z = 0 });
 
-    var heart = Polygon.init(surface, color.RED, .{ .x = 50, .y = 0, .z = -100 }, quaternion.Quaternion{});
+    var heart = Polygon.init(surface, color.RED, .{ .x = 70, .y = 20, .z = -100 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
 
     while (true) {
         const t = std.time.microTimestamp();
-        heart.transform(@floatFromInt(t));
+        //heart.transform(@floatFromInt(t));
+        heart.transform(500);
         const vert = try heart.projection(allocator);
         defer vert.deinit();
-
         try screen.draw_surface(vert, heart.color);
         screen.print();
         screen.clear();
-        std.time.sleep(1_000_000_000);
+        std.time.sleep(5_00_000_000);
+        const t2 = std.time.microTimestamp();
+        std.debug.print("render time {}\n", .{t2 - t});
     }
 
     //try screen.draw_line_double(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, color.RED);
@@ -322,10 +314,10 @@ pub fn main() !void {
 }
 
 test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
+    var list = std.ArrayList(i64).init(std.testing.allocator);
     defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
     try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+    try std.testing.expectEqual(@as(i64, 42), list.pop());
 }
 
 test "fuzz example" {

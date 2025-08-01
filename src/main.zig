@@ -5,6 +5,7 @@ const ansi = @import("ansi");
 const char = @import("chars");
 const polygon = @import("polygon");
 const Polygon = polygon.Polygon;
+const AtomColor = polygon.AtomColor;
 const quaternion = @import("quaternions");
 const vectors = @import("vectors");
 const vec2i = vectors.vec2i;
@@ -12,7 +13,7 @@ const vec2z = vectors.vec2z;
 const vec2 = vectors.vec2;
 const vec3 = vectors.vec3;
 
-const SCREEN_WIDTH: u32 = 64;
+const SCREEN_WIDTH: u32 = 128;
 const SCREEN_HEIGHT: u32 = 32;
 const SCREEN_DEFAULT_CHAR: u8 = ' ';
 
@@ -20,6 +21,7 @@ const Edge = struct {
     start: vec2z,
     end: vec2z,
     atoms: std.ArrayList(vec2z),
+    const z_bias = 1e-5; // Small offset to make edges closer
 
     fn deinit(self: *Edge) void {
         self.atoms.deinit();
@@ -65,8 +67,8 @@ const Edge = struct {
         while (x <= x1) : (x += 1) {
             const px = if (steep) y else x;
             const py = if (steep) x else y;
-            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT) {
-                try edge.atoms.append(.{ .x = px, .y = py, .z = curr_depth });
+            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
+                try edge.atoms.append(.{ .x = px, .y = py, .z = curr_depth + z_bias });
                 curr_depth += depth_step;
             }
             err -= dy;
@@ -109,18 +111,6 @@ const Char = struct {
         c.bg = bg;
         return c;
     }
-};
-
-const AtomColor = enum {
-    NONE,
-    BLACK,
-    RED,
-    GREEN,
-    YELLOW,
-    BLUE,
-    PURPLE,
-    CYAN,
-    WHITE,
 };
 
 const Screen = struct {
@@ -342,10 +332,10 @@ const Screen = struct {
 
         // free edges
         for (edges.items) |*edge| {
-            self.emplace(edge.atoms.items, AtomColor.PURPLE);
+            //self.emplace(edge.atoms.items, AtomColor.PURPLE);
             edge.deinit();
         }
-        self.emplace(vertecies, AtomColor.GREEN);
+        //self.emplace(vertecies, AtomColor.GREEN);
     }
 
     fn init_terminal() !void {
@@ -365,6 +355,61 @@ const Screen = struct {
     }
 };
 
+pub const Cube = struct {
+    faces: [6]Polygon,
+    pos: vec3 = .{ .x = 0, .y = 0, .z = 5.0 }, // Offset from camera for visibility
+
+    pub fn init(side: f64, offset: vec3, allocator: std.mem.Allocator) !Cube {
+        const q = quaternion.Quaternion.init(0, 1, 1, 1); // Identity start
+        const h = side / 2.0; // Half-side for centering at origin
+        const verts = [_]vec3{
+            .{ .x = -h, .y = -h, .z = -h }, // 0: back-bottom-left
+            .{ .x = h, .y = -h, .z = -h }, // 1: back-bottom-right
+            .{ .x = h, .y = h, .z = -h }, // 2: back-top-right
+            .{ .x = -h, .y = h, .z = -h }, // 3: back-top-left
+            .{ .x = -h, .y = -h, .z = h }, // 4: front-bottom-left
+            .{ .x = h, .y = -h, .z = h }, // 5: front-bottom-right
+            .{ .x = h, .y = h, .z = h }, // 6: front-top-right
+            .{ .x = -h, .y = h, .z = h }, // 7: front-top-left
+        };
+
+        // Initialize each face as a Polygon
+        var back_verts = std.ArrayList(vec3).init(allocator);
+        try back_verts.ensureTotalCapacity(4);
+        try back_verts.appendSlice(&[_]vec3{ verts[0], verts[1], verts[2], verts[3] });
+
+        var front_verts = std.ArrayList(vec3).init(allocator);
+        try front_verts.ensureTotalCapacity(4);
+        try front_verts.appendSlice(&[_]vec3{ verts[4], verts[5], verts[6], verts[7] });
+
+        var left_verts = std.ArrayList(vec3).init(allocator);
+        try left_verts.ensureTotalCapacity(4);
+        try left_verts.appendSlice(&[_]vec3{ verts[0], verts[3], verts[7], verts[4] });
+
+        var right_verts = std.ArrayList(vec3).init(allocator);
+        try right_verts.ensureTotalCapacity(4);
+        try right_verts.appendSlice(&[_]vec3{ verts[1], verts[2], verts[6], verts[5] });
+
+        var bottom_verts = std.ArrayList(vec3).init(allocator);
+        try bottom_verts.ensureTotalCapacity(4);
+        try bottom_verts.appendSlice(&[_]vec3{ verts[0], verts[1], verts[5], verts[4] });
+
+        var top_verts = std.ArrayList(vec3).init(allocator);
+        try top_verts.ensureTotalCapacity(4);
+        try top_verts.appendSlice(&[_]vec3{ verts[3], verts[2], verts[6], verts[7] });
+
+        return .{
+            .faces = [_]Polygon{
+                Polygon.init(back_verts, AtomColor.RED, offset, q),
+                Polygon.init(front_verts, AtomColor.GREEN, offset, q),
+                Polygon.init(left_verts, AtomColor.BLUE, offset, q),
+                Polygon.init(right_verts, AtomColor.YELLOW, offset, q),
+                Polygon.init(bottom_verts, AtomColor.PURPLE, offset, q),
+                Polygon.init(top_verts, AtomColor.CYAN, offset, q),
+            },
+        };
+    }
+};
 pub fn main() !void {
     var screen = Screen{};
     try Screen.init_terminal();
@@ -377,32 +422,30 @@ pub fn main() !void {
     try surface.append(.{ .x = 10, .y = 10, .z = 0 });
     try surface.append(.{ .x = 10, .y = -10, .z = 0 });
 
-    var surf_cube = std.ArrayList(vec3).init(allocator);
-    defer surf_cube.deinit();
+    var heart = Polygon.init(surface, AtomColor.RED, .{ .x = 35, .y = 15, .z = 50 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
+    var paper = Polygon.init(surface, AtomColor.YELLOW, .{ .x = 45, .y = 35, .z = 100 }, quaternion.Quaternion{ .a = 0, .b = 0, .c = 1, .d = 0 });
 
-    try surf_cube.append(.{ .x = -10, .y = -10, .z = 10 });
-    try surf_cube.append(.{ .x = -10, .y = 10, .z = 10 });
-    try surf_cube.append(.{ .x = 10, .y = 10, .z = 10 });
-    try surf_cube.append(.{ .x = 10, .y = -10, .z = 10 });
-    try surf_cube.append(.{ .x = -10, .y = -10, .z = -10 });
-    try surf_cube.append(.{ .x = -10, .y = 10, .z = -10 });
-    try surf_cube.append(.{ .x = 10, .y = 10, .z = -10 });
-    try surf_cube.append(.{ .x = 10, .y = -10, .z = -10 });
-
-    var heart = Polygon.init(surface, ansi.RED, .{ .x = 35, .y = 15, .z = 50 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
-    var paper = Polygon.init(surface, ansi.RED, .{ .x = 45, .y = 35, .z = 100 }, quaternion.Quaternion{ .a = 0, .b = 0, .c = 1, .d = 0 });
+    var cube = try Cube.init(20, .{ .x = 0, .y = 0, .z = 50 }, allocator);
 
     while (true) {
         const t = std.time.microTimestamp();
         heart.transform(50);
         paper.transform(10);
+
+        for (&cube.faces) |*poly| {
+            poly.transform(30);
+            const verts = try poly.projection(allocator);
+            defer verts.deinit();
+            try screen.draw_surface(verts.items, poly.color);
+        }
+
         //heart.transform(@floatFromInt(10));
-        const vert = try heart.projection(allocator);
-        defer vert.deinit();
-        const vert2 = try paper.projection(allocator);
-        defer vert2.deinit();
-        try screen.draw_surface(vert.items, AtomColor.RED);
-        try screen.draw_surface(vert2.items, AtomColor.YELLOW);
+        // const vert = try heart.projection(allocator);
+        // defer vert.deinit();
+        // const vert2 = try paper.projection(allocator);
+        // defer vert2.deinit();
+        // try screen.draw_surface(vert.items, heart.color);
+        // try screen.draw_surface(vert2.items, paper.color);
         try screen.print();
         screen.clear();
         const t2 = std.time.microTimestamp();

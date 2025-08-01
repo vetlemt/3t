@@ -22,8 +22,8 @@ pub fn build(b: *std.Build) void {
     // in this directory.
     //
     // Define the colors and vectors modules
-    const colors_module = b.addModule("colors", .{
-        .root_source_file = b.path("src/graphics/colors.zig"),
+    const ansi_module = b.addModule("ansi", .{
+        .root_source_file = b.path("src/graphics/ansi.zig"),
         .target = target,
     });
 
@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/graphics/polygon.zig"),
         .target = target,
         .imports = &.{
-            .{ .name = "colors", .module = colors_module },
+            .{ .name = "ansi", .module = ansi_module },
             .{ .name = "vectors", .module = vectors_module },
             .{ .name = "quaternions", .module = quaternions_module },
             .{ .name = "projection", .module = projection_module },
@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "_3t", .module = mod },
-                .{ .name = "colors", .module = colors_module },
+                .{ .name = "ansi", .module = ansi_module },
                 .{ .name = "vectors", .module = vectors_module },
                 .{ .name = "polygon", .module = polygon_module },
                 .{ .name = "chars", .module = chars_module },

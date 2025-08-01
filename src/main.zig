@@ -1,8 +1,8 @@
 const std = @import("std");
 
 const _3t = @import("_3t");
+const ansi = @import("ansi");
 const char = @import("chars");
-const color = @import("colors");
 const polygon = @import("polygon");
 const Polygon = polygon.Polygon;
 const quaternion = @import("quaternions");
@@ -106,21 +106,42 @@ const MAX_CHAR_SIZE: usize = 8;
 
 const Char = struct {
     data: *const []const u8 = char.NONE,
-    color: *const []const u8 = color.WHITE,
+    fg: ansi.Color = ansi.WHITE,
+    bg: ansi.Color = ansi.NONE,
 
-    fn init(character: *const []const u8, col: *const []const u8) Char {
+    fn init(character: *const []const u8, fg: ansi.Color, bg: ansi.Color) Char {
         var c: Char = undefined;
         c.data = character;
-        c.color = col;
+        c.fg = fg;
+        c.bg = bg;
         return c;
     }
 };
 
 const Screen = struct {
+    const AtomColor = enum {
+        NONE,
+        BLACK,
+        RED,
+        GREEN,
+        YELLOW,
+        BLUE,
+        PURPLE,
+        CYAN,
+        WHITE,
+    };
+
     chars: [SCREEN_HEIGHT][SCREEN_WIDTH]Char = blk: {
         const default_char = Char{};
         const default_row: [SCREEN_WIDTH]Char = .{default_char} ** SCREEN_WIDTH;
         const result: [SCREEN_HEIGHT][SCREEN_WIDTH]Char = .{default_row} ** SCREEN_HEIGHT;
+        break :blk result;
+    },
+
+    atoms: [SCREEN_HEIGHT * 2][SCREEN_WIDTH]AtomColor = blk: {
+        const default_char = AtomColor.NONE;
+        const default_row: [SCREEN_WIDTH]AtomColor = .{default_char} ** SCREEN_WIDTH;
+        const result: [SCREEN_HEIGHT * 2][SCREEN_WIDTH]AtomColor = .{default_row} ** (SCREEN_HEIGHT * 2);
         break :blk result;
     },
 
@@ -130,27 +151,92 @@ const Screen = struct {
                 self.chars[i][j].data = char.NONE;
             }
         }
+        for (0..SCREEN_HEIGHT * 2) |i| {
+            for (0..SCREEN_WIDTH) |j| {
+                self.atoms[i][j] = AtomColor.NONE;
+            }
+        }
     }
 
-    fn print(self: *const Screen) void {
-        //std.debug.print(color.CLEAR.*, .{});
-        std.debug.print("┌", .{});
-        for (0..SCREEN_WIDTH) |_| {
-            std.debug.print("─", .{});
-        }
-        std.debug.print("┐\n", .{});
-        for (self.chars, 0..self.chars.len) |row, i| {
-            std.debug.print("│", .{});
-            for (row) |c| {
-                std.debug.print("{s}{s}{s}", .{ c.color.*, c.data.*, color.RESET.* });
+    fn get_ansi_color(color: AtomColor) ansi.Color {
+        return switch (color) {
+            AtomColor.NONE => ansi.NONE,
+            AtomColor.BLACK => ansi.BLACK,
+            AtomColor.RED => ansi.RED,
+            AtomColor.GREEN => ansi.GREEN,
+            AtomColor.YELLOW => ansi.YELLOW,
+            AtomColor.BLUE => ansi.BLUE,
+            AtomColor.PURPLE => ansi.PURPLE,
+            AtomColor.CYAN => ansi.CYAN,
+            AtomColor.WHITE => ansi.WHITE,
+        };
+    }
+
+    fn get_ansi_bg_color(color: AtomColor) ansi.Color {
+        return switch (color) {
+            AtomColor.NONE => ansi.NONE,
+            AtomColor.BLACK => ansi.BG_BLACK,
+            AtomColor.RED => ansi.BG_RED,
+            AtomColor.GREEN => ansi.BG_GREEN,
+            AtomColor.YELLOW => ansi.BG_YELLOW,
+            AtomColor.BLUE => ansi.BG_BLUE,
+            AtomColor.PURPLE => ansi.BG_PURPLE,
+            AtomColor.CYAN => ansi.BG_CYAN,
+            AtomColor.WHITE => ansi.BG_WHITE,
+        };
+    }
+
+    fn render_sub_pixels(self: *Screen) void {
+        for (0..SCREEN_HEIGHT) |yy| {
+            for (0..SCREEN_WIDTH) |xx| {
+                const upper = self.atoms[yy * 2][xx];
+                const lower = self.atoms[yy * 2 + 1][xx];
+                const upper_fg = get_ansi_color(upper);
+                const lower_fg = get_ansi_color(lower);
+                const lower_bg = get_ansi_bg_color(lower);
+
+                if ((upper == AtomColor.NONE) and (lower == AtomColor.NONE)) { // NOTHING
+                    self.chars[yy][xx] = Char.init(char.NONE, ansi.NONE, ansi.NONE);
+                } else if ((upper != AtomColor.NONE) and (lower == AtomColor.NONE)) { // UPPER ONLY
+                    self.chars[yy][xx] = Char.init(char.UPPER, upper_fg, ansi.NONE);
+                } else if ((upper == AtomColor.NONE) and (lower != AtomColor.NONE)) { // LOWER ONLY
+                    self.chars[yy][xx] = Char.init(char.LOWER, lower_fg, ansi.NONE);
+                } else if (upper == lower) { // UPPER AND LOWER THE SAME
+                    self.chars[yy][xx] = Char.init(char.FULL, upper_fg, ansi.NONE);
+                } else { // UPPER AND LOWER DIFFERENT
+                    self.chars[yy][xx] = Char.init(char.UPPER, upper_fg, lower_bg);
+                }
             }
-            std.debug.print("│{d}\n", .{i});
         }
-        std.debug.print("└", .{});
+    }
+
+    fn print(self: *Screen) !void {
+        //std.debug.print(color.CLEAR.*, .{});
+        self.render_sub_pixels();
+        const stdout = std.io.getStdOut();
+        var buffered = std.io.bufferedWriter(stdout.writer());
+        const writer = buffered.writer();
+        // Clear and home cursor each time (but stay in alt screen)
+        try writer.print("\x1B[2J\x1B[1;1H", .{});
+
+        try writer.print("┌", .{});
         for (0..SCREEN_WIDTH) |_| {
-            std.debug.print("─", .{});
+            try writer.print("─", .{});
         }
-        std.debug.print("┘\n", .{});
+        try writer.print("┐\n", .{});
+        for (self.chars, 0..self.chars.len) |row, i| {
+            try writer.print("│", .{});
+            for (row) |c| {
+                try writer.print("{s}{s}{s}{s}", .{ c.fg.*, c.bg.*, c.data.*, ansi.RESET.* });
+            }
+            try writer.print("│{d}\n", .{i});
+        }
+        try writer.print("└", .{});
+        for (0..SCREEN_WIDTH) |_| {
+            try writer.print("─", .{});
+        }
+        try writer.print("┘\n", .{});
+        try buffered.flush();
     }
 
     fn fill_y(self: *Screen, start: vec2i, length: usize, fill: Char) void {
@@ -164,58 +250,60 @@ const Screen = struct {
         }
     }
 
-    fn fill_x(self: *Screen, start: vec2i, length: usize, fill: Char) void {
+    fn fill_x(self: *Screen, start: vec2i, length: usize, fill: AtomColor) void {
         const yy: usize = @intCast(start.y);
         const x0: usize = @intCast(start.x);
         //std.debug.print("y0: {}, xx: {}, length: {}\n", .{ y0, xx, length });
         for (x0..(x0 + length)) |xx| {
-            if ((xx < SCREEN_WIDTH) and (yy < SCREEN_HEIGHT)) {
-                self.chars[yy][xx] = fill;
+            if ((xx < SCREEN_WIDTH) and (xx >= 0) and (yy < SCREEN_HEIGHT * 2) and (yy >= 0)) {
+                self.atoms[yy][xx] = fill;
             }
         }
     }
 
-    fn emplace(self: *Screen, items: std.ArrayList(vec2i), fill: Char) void {
-        for (items.items) |*item| {
-            if ((item.x < SCREEN_WIDTH) and (item.x > 0) and (item.y < SCREEN_HEIGHT) and (item.y > 0)) {
+    fn emplace(self: *Screen, items: []vec2i, fill: AtomColor) void {
+        for (items) |*item| {
+            if ((item.x < SCREEN_WIDTH) and (item.x >= 0) and (item.y < SCREEN_HEIGHT * 2) and (item.y >= 0)) {
                 const xx: usize = @intCast(item.x);
                 const yy: usize = @intCast(item.y);
-                self.chars[yy][xx] = fill;
+                self.atoms[yy][xx] = fill;
             }
         }
     }
 
-    fn draw_line_double(self: *Screen, start: vec2i, end: vec2i, col: color.Type) !void {
+    fn draw_line_double(self: *Screen, start: vec2i, end: vec2i, col: ansi.Color) !void {
+        _ = self; // autofix
         //std.debug.print("<-- drawing line -->\n", .{});
         const fill = Char.init(char.FULL, col);
+        _ = fill; // autofix
 
         const allocator = std.heap.page_allocator;
         var edge = try Edge.init(start, end, allocator);
         defer edge.deinit();
 
-        self.emplace(edge.atoms, fill);
+        //self.emplace(edge.atoms.items, fill);
     }
 
-    fn draw_surface(self: *Screen, vertecies: std.ArrayList(vec2i), col: color.Type) !void {
+    fn draw_surface(self: *Screen, vertecies: []vec2i, col: ansi.Color) !void {
+        _ = col; // autofix
         //std.debug.print("<-- drawing surface -->\n", .{});
-        const fill = Char.init(char.FULL, col);
 
         const allocator = std.heap.page_allocator;
         var edges = std.ArrayList(Edge).init(allocator);
         defer edges.deinit();
 
-        for (1..vertecies.items.len) |i| {
+        for (1..vertecies.len) |i| {
             //std.debug.print("<-- drawing surface edge -->\n", .{});
-            const e = try Edge.init(vertecies.items[i - 1], vertecies.items[i], allocator);
+            const e = try Edge.init(vertecies[i - 1], vertecies[i], allocator);
             try edges.append(e);
         }
         //std.debug.print("<-- drawing surface edge -->\n", .{});
-        const e = try Edge.init(vertecies.items[vertecies.items.len - 1], vertecies.items[0], allocator);
+        const e = try Edge.init(vertecies[vertecies.len - 1], vertecies[0], allocator);
         try edges.append(e);
 
         var max_y: i64 = std.math.minInt(i64);
         var min_y: i64 = std.math.maxInt(i64);
-        for (vertecies.items) |*v| {
+        for (vertecies) |*v| {
             if (v.y > max_y) max_y = v.y;
             if (v.y < min_y) min_y = v.y;
         }
@@ -223,15 +311,15 @@ const Screen = struct {
         const first_y: usize =
             if (min_y < 0)
                 0
-            else if (min_y > SCREEN_HEIGHT)
-                SCREEN_HEIGHT - 1
+            else if (min_y > SCREEN_HEIGHT * 2)
+                SCREEN_HEIGHT * 2 - 1
             else
                 @intCast(min_y);
         const last_y: usize =
             if (max_y < 0)
                 0
-            else if (max_y > SCREEN_HEIGHT)
-                SCREEN_HEIGHT - 1
+            else if (max_y > SCREEN_HEIGHT * 2)
+                SCREEN_HEIGHT * 2 - 1
             else
                 @intCast(max_y);
 
@@ -267,21 +355,38 @@ const Screen = struct {
                 const x0: i64 = intersections.items[i * 2];
                 const x1: i64 = intersections.items[(i * 2) + 1];
                 const length: usize = @intCast(x1 - x0);
-                self.fill_x(.{ .x = x0, .y = @intCast(y) }, length, fill);
+                self.fill_x(.{ .x = x0, .y = @intCast(y) }, length, AtomColor.RED);
             }
         }
 
         // free edges
         for (edges.items) |*edge| {
-            self.emplace(edge.atoms, Char.init(char.FULL, color.PURPLE));
+            self.emplace(edge.atoms.items, AtomColor.PURPLE);
             edge.deinit();
         }
-        self.emplace(vertecies, Char.init(char.FULL, color.GREEN));
+        self.emplace(vertecies, AtomColor.GREEN);
+    }
+
+    fn init_terminal() !void {
+        const stdout = std.io.getStdOut().writer();
+        // Enter alternate screen and hide cursor
+        try stdout.print("\x1B[?1049h\x1B[?25l", .{});
+        // Optional: Initial clear and home
+        try stdout.print("\x1B[2J\x1B[1;1H", .{});
+    }
+
+    fn deinit_terminal() !void {
+        const stdout = std.io.getStdOut().writer();
+        // Exit alternate screen, show cursor, reset colors
+        try stdout.print("\x1B[?1049l\x1B[?25h\x1B[0m", .{});
+        // Optional: Final clear if needed
+        try stdout.print("\x1B[2J\x1B[1;1H", .{});
     }
 };
 
 pub fn main() !void {
     var screen = Screen{};
+    try Screen.init_terminal();
 
     const allocator = std.heap.page_allocator;
     var surface = std.ArrayList(vec3).init(allocator);
@@ -291,26 +396,22 @@ pub fn main() !void {
     try surface.append(.{ .x = 10, .y = 10, .z = 0 });
     try surface.append(.{ .x = 10, .y = -10, .z = 0 });
 
-    var heart = Polygon.init(surface, color.RED, .{ .x = 70, .y = 20, .z = -100 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
+    var heart = Polygon.init(surface, ansi.RED, .{ .x = 35, .y = 15, .z = -50 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
 
     while (true) {
         const t = std.time.microTimestamp();
-        //heart.transform(@floatFromInt(t));
-        heart.transform(500);
+        heart.transform(50);
+        //heart.transform(@floatFromInt(10));
         const vert = try heart.projection(allocator);
         defer vert.deinit();
-        try screen.draw_surface(vert, heart.color);
-        screen.print();
+        try screen.draw_surface(vert.items, heart.color);
+        try screen.print();
         screen.clear();
-        std.time.sleep(5_00_000_000);
         const t2 = std.time.microTimestamp();
-        std.debug.print("render time {}\n", .{t2 - t});
+        std.debug.print("render time µs {}\n", .{t2 - t});
+        std.time.sleep(16_666_666);
     }
-
-    //try screen.draw_line_double(.{ .x = 16, .y = 16 }, .{ .x = 32, .y = 32 }, color.RED);
-    //try screen.draw_line_double(.{ .x = 25, .y = 0 }, .{ .x = 25, .y = 25 }, color.BLUE);
-    //try screen.draw_line_double(.{ .x = 25, .y = 0 }, .{ .x = 50, .y = 0 }, color.GREEN);
-
+    Screen.deinit_terminal();
 }
 
 test "simple test" {

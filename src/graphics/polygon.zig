@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const colors = @import("colors");
+const ansi = @import("ansi");
 const projecting = @import("projection");
 const quaternions = @import("quaternions");
 const Quaternion = quaternions.Quaternion;
@@ -13,17 +13,17 @@ pub const Line = struct {
     start: vec3,
     end: vec3,
     center: vec3,
-    color: colors.Type,
+    color: ansi.Color,
 };
 
 pub const Polygon = struct {
-    color: colors.Type,
+    color: ansi.Color,
     vertices: std.ArrayList(vec3),
     offset: vec3,
     center: vec3,
     q: Quaternion,
 
-    pub fn init(vertices: std.ArrayList(vec3), color: colors.Type, offset: vec3, q: Quaternion) Polygon {
+    pub fn init(vertices: std.ArrayList(vec3), color: ansi.Color, offset: vec3, q: Quaternion) Polygon {
         var polygon: Polygon = undefined;
         polygon.vertices = vertices;
         polygon.color = color;

@@ -8,6 +8,7 @@ const vectors = @import("vectors");
 const vec2i = vectors.vec2i;
 const vec2 = vectors.vec2;
 const vec3 = vectors.vec3;
+const vec2z = vectors.vec2z;
 
 pub const Line = struct {
     start: vec3,
@@ -42,17 +43,21 @@ pub const Polygon = struct {
         return polygon;
     }
 
-    pub fn projection(self: *Polygon, allocator: std.mem.Allocator) !std.ArrayList(vec2i) {
-        var projected = std.ArrayList(vec2i).init(allocator);
+    pub fn projection(self: *Polygon, allocator: std.mem.Allocator) !std.ArrayList(vec2z) {
+        var projected = std.ArrayList(vec2z).init(allocator);
 
-        const fov = 2.0 * std.math.pi / 5.0; //* 72 deg */ /* PI/2.0; // 90deg */
+        const fov = 2.0 * std.math.pi / 5.0; //* 72 deg */
         const ez = std.math.tan(1.0 / (fov / 2.0));
-        const e = vec3{ .x = 0, .y = 0, .z = ez };
+        const e = vec3{ .x = 0, .y = 0, .z = -ez };
         const t = vec3{ .x = 0, .y = 0, .z = 0 };
         for (self.vertices.items) |v| {
             const a = vec3{ .x = v.x + self.offset.x, .y = v.y + self.offset.y, .z = v.z + self.offset.z };
-            var p = projecting.project_point(a, e, t);
-            try projected.append(p.to_int());
+            const p = projecting.project_point(a, e, t);
+            try projected.append(.{
+                .x = @intFromFloat(p.x),
+                .y = @intFromFloat(p.y),
+                .z = p.z,
+            });
         }
         return projected;
     }

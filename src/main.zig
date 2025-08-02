@@ -8,6 +8,7 @@ const Polygon = polygon.Polygon;
 const AtomColor = polygon.AtomColor;
 const quaternion = @import("quaternions");
 const vectors = @import("vectors");
+const vec1z = vectors.vec1z;
 const vec2i = vectors.vec2i;
 const vec2z = vectors.vec2z;
 const vec2 = vectors.vec2;
@@ -21,7 +22,7 @@ const Edge = struct {
     start: vec2z,
     end: vec2z,
     atoms: std.ArrayList(vec2z),
-    const z_bias = 1e-5; // Small offset to make edges closer
+    const z_bias = 0; // Small offset to make edges closer
 
     fn deinit(self: *Edge) void {
         self.atoms.deinit();
@@ -32,68 +33,73 @@ const Edge = struct {
         edge.start = start;
         edge.end = end;
         edge.atoms = std.ArrayList(vec2z).init(allocator);
-
         var x0: i64 = start.x;
         var y0: i64 = start.y;
         var x1: i64 = end.x;
         var y1: i64 = end.y;
-
+        var depth_start = start.z;
+        var depth_end = end.z;
         const steep = @abs(y1 - y0) > @abs(x1 - x0);
         if (steep) {
             std.mem.swap(i64, &x0, &y0);
             std.mem.swap(i64, &x1, &y1);
         }
-
         if (x0 > x1) {
             std.mem.swap(i64, &x0, &x1);
             std.mem.swap(i64, &y0, &y1);
+            std.mem.swap(f64, &depth_start, &depth_end); // Swap depths too!
         }
-
         const dx: i64 = x1 - x0;
         const dy: i64 = @intCast(@abs(y1 - y0));
         var err: i64 = @divTrunc(dx, 2);
         const ystep: i64 = if (y0 < y1) 1 else -1;
         var y: i64 = y0;
-
-        const depth_start = start.z;
-        const depth_end = end.z;
         const delta_depth = depth_end - depth_start;
-        const num_steps = @max(@abs(x1 - x0), @abs(y1 - y0)); // Rough step count for interp
-        const depth_step = if (num_steps > 0) delta_depth / @as(f64, @floatFromInt(num_steps)) else 0.0;
-
-        var curr_depth = depth_start;
-
+        const num_steps = dx; // Additions between dx+1 points
+        const depth_step = if (dx > 0) delta_depth / @as(f64, @floatFromInt(num_steps)) else 0.0;
         var x: i64 = x0;
+        var n: f64 = 0;
         while (x <= x1) : (x += 1) {
             const px = if (steep) y else x;
             const py = if (steep) x else y;
             if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
-                try edge.atoms.append(.{ .x = px, .y = py, .z = curr_depth + z_bias });
-                curr_depth += depth_step;
+                try edge.atoms.append(.{ .x = px, .y = py, .z = (depth_start + (depth_step * n)) + z_bias });
             }
+            n += 1.0;
+
             err -= dy;
             if (err < 0) {
                 y += ystep;
                 err += dx;
             }
         }
+        // Force last atom to exact end depth (overrides FP drift)
+        if (edge.atoms.items.len > 0) {
+            //const last_interpolated = edge.atoms.items[edge.atoms.items.len - 1].z;
+            //const depth_error = depth_end - last_interpolated;
+            //std.debug.print("edge end z projected {}, interpolated {}, error {}, step {}\n", .{ depth_end, last_interpolated, depth_error, depth_step });
 
+            edge.atoms.items[edge.atoms.items.len - 1].z = depth_end + z_bias;
+        }
         std.sort.heap(vec2z, edge.atoms.items, {}, struct {
             pub fn lessThan(_: void, a: vec2z, b: vec2z) bool {
                 if (a.y != b.y) return a.y < b.y;
                 return a.x < b.x;
             }
         }.lessThan);
-
         return edge;
     }
 
-    fn intersects(self: *const Edge, y: i64) ?struct { i64, f64 } {
+    fn intersects(self: *const Edge, y: i64) ?vec1z {
         if (self.start.y == self.end.y) return null;
         for (self.atoms.items) |atom| {
-            if (atom.y == y) return .{ atom.x, atom.z };
+            if (atom.y == y) return .{ .x = atom.x, .z = atom.z };
         }
         return null;
+    }
+
+    fn average_depth(self: *const Edge) f64 {
+        return (self.start.z + self.end.z) / 2;
     }
 };
 
@@ -205,7 +211,7 @@ const Screen = struct {
         var buffered = std.io.bufferedWriter(stdout.writer());
         const writer = buffered.writer();
         // Clear and home cursor each time (but stay in alt screen)
-        try writer.print("\x1B[2J\x1B[1;1H", .{});
+        //try writer.print("\x1B[2J\x1B[1;1H", .{});
 
         try writer.print("┌", .{});
         for (0..SCREEN_WIDTH) |_| {
@@ -227,22 +233,32 @@ const Screen = struct {
         try buffered.flush();
     }
 
-    fn fill_x(self: *Screen, start: vec2i, length: usize, color: AtomColor, depth_start: f64, depth_end: f64) void {
+    fn fill_x(self: *Screen, start: vec2z, end: vec1z, color: AtomColor) void {
+        const length: usize = @intCast(end.x - start.x);
         if (length == 0) return;
-        const d_depth = (depth_end - depth_start) / @as(f64, @floatFromInt(length));
-        const curr_depth = depth_start;
+        const d_depth = (end.z - start.z) / @as(f64, @floatFromInt(length));
+        const curr_depth = start.z;
         const clamped_x0 = @max(0, start.x);
         const clamped_end = @min(@as(i64, @intCast(SCREEN_WIDTH - 1)), start.x + @as(i64, @intCast(length)));
         var offset: i64 = clamped_x0 - start.x;
         var x = clamped_x0;
+        if (color == AtomColor.PURPLE) {
+            std.debug.print("y{} ( {} => {})\n", .{ start.y, clamped_x0, clamped_end });
+        }
         while (x <= clamped_end) : (x += 1) {
             const vy: usize = @intCast(start.y); // Virtual y
-            const atom_depth = curr_depth + d_depth * @as(f64, @floatFromInt(offset));
-            if (atom_depth < self.atoms[vy][x].z) { // Smaller depth = closer, overwrite
+            const atom_depth = curr_depth + (d_depth * @as(f64, @floatFromInt(offset)));
+            offset += 1;
+            if (color == AtomColor.PURPLE) {
+                std.debug.print("({},{}) {} vs {}\n", .{ x, vy, atom_depth, self.atoms[vy][x].z });
+            }
+            if (atom_depth < self.atoms[vy][x].z + 1e-10) { // Smaller depth = closer, overwrite
+                if (color == AtomColor.PURPLE) {
+                    std.debug.print("-painted-\n", .{});
+                }
                 self.atoms[vy][x].color = color;
                 self.atoms[vy][x].z = atom_depth;
             }
-            offset += 1;
         }
     }
 
@@ -297,14 +313,14 @@ const Screen = struct {
                 @intCast(max_y);
 
         for (first_y..last_y) |y| {
-            var intersections = std.ArrayList(struct { i64, f64 }).init(allocator);
+            var intersections = std.ArrayList(vec1z).init(allocator);
             defer intersections.deinit();
 
             for (edges.items) |*edge| {
                 if (edge.intersects(@intCast(y))) |intersection| {
                     var is_already_in_list = false;
                     for (intersections.items) |x| {
-                        if (x.@"0" == intersection.@"0") {
+                        if (x.x == intersection.x) {
                             is_already_in_list = true;
                             break;
                         }
@@ -315,9 +331,9 @@ const Screen = struct {
                 }
             }
 
-            std.sort.heap(struct { i64, f64 }, intersections.items, {}, struct {
-                pub fn lessThan(_: void, a: struct { i64, f64 }, b: struct { i64, f64 }) bool {
-                    return a.@"0" < b.@"0";
+            std.sort.heap(vec1z, intersections.items, {}, struct {
+                pub fn lessThan(_: void, a: vec1z, b: vec1z) bool {
+                    return a.x < b.x;
                 }
             }.lessThan);
 
@@ -325,17 +341,16 @@ const Screen = struct {
                 const x0 = intersections.items[i * 2];
                 const x1 = intersections.items[(i * 2) + 1];
 
-                const length: usize = @intCast(x1.@"0" - x0.@"0");
-                self.fill_x(.{ .x = x0.@"0", .y = @intCast(y) }, length, color, x0.@"1", x1.@"1");
+                self.fill_x(x0.to_vec2z(@intCast(y)), x1, color);
             }
         }
 
         // free edges
         for (edges.items) |*edge| {
-            //self.emplace(edge.atoms.items, AtomColor.PURPLE);
+            //   self.emplace(edge.atoms.items, AtomColor.PURPLE);
             edge.deinit();
         }
-        //self.emplace(vertecies, AtomColor.GREEN);
+        // self.emplace(vertecies, AtomColor.GREEN);
     }
 
     fn init_terminal() !void {
@@ -364,13 +379,13 @@ pub const Cube = struct {
         const h = side / 2.0; // Half-side for centering at origin
         const verts = [_]vec3{
             .{ .x = -h, .y = -h, .z = -h }, // 0: back-bottom-left
-            .{ .x = h, .y = -h, .z = -h }, // 1: back-bottom-right
-            .{ .x = h, .y = h, .z = -h }, // 2: back-top-right
-            .{ .x = -h, .y = h, .z = -h }, // 3: back-top-left
-            .{ .x = -h, .y = -h, .z = h }, // 4: front-bottom-left
-            .{ .x = h, .y = -h, .z = h }, // 5: front-bottom-right
-            .{ .x = h, .y = h, .z = h }, // 6: front-top-right
-            .{ .x = -h, .y = h, .z = h }, // 7: front-top-left
+            .{ .x = h, .y = -h, .z = -h }, //- 1: back-bottom-right
+            .{ .x = h, .y = h, .z = -h }, //-- 2: back-top-right
+            .{ .x = -h, .y = h, .z = -h }, //- 3: back-top-left
+            .{ .x = -h, .y = -h, .z = h }, //- 4: front-bottom-left
+            .{ .x = h, .y = -h, .z = h }, //-- 5: front-bottom-right
+            .{ .x = h, .y = h, .z = h }, //--- 6: front-top-right
+            .{ .x = -h, .y = h, .z = h }, //-- 7: front-top-left
         };
 
         // Initialize each face as a Polygon
@@ -412,7 +427,7 @@ pub const Cube = struct {
 };
 pub fn main() !void {
     var screen = Screen{};
-    try Screen.init_terminal();
+    //try Screen.init_terminal();
 
     const allocator = std.heap.page_allocator;
     var surface = std.ArrayList(vec3).init(allocator);
@@ -427,18 +442,19 @@ pub fn main() !void {
 
     var cube = try Cube.init(20, .{ .x = 0, .y = 0, .z = 50 }, allocator);
 
-    while (true) {
+    var itteration: u64 = 0;
+    var running: bool = true;
+    while (running) {
         const t = std.time.microTimestamp();
         heart.transform(50);
         paper.transform(10);
 
         for (&cube.faces) |*poly| {
-            poly.transform(30);
+            poly.transform(1740); //30
             const verts = try poly.projection(allocator);
             defer verts.deinit();
             try screen.draw_surface(verts.items, poly.color);
         }
-
         //heart.transform(@floatFromInt(10));
         // const vert = try heart.projection(allocator);
         // defer vert.deinit();
@@ -450,9 +466,12 @@ pub fn main() !void {
         screen.clear();
         const t2 = std.time.microTimestamp();
         std.debug.print("render time µs {}\n", .{t2 - t});
+        std.debug.print("itteration {}\n", .{itteration});
         std.time.sleep(16_666_666);
+        itteration += 1;
+        running = false;
     }
-    Screen.deinit_terminal();
+    // try Screen.deinit_terminal();
 }
 
 test "simple test" {

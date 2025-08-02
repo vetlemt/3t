@@ -23,5 +23,13 @@ pub const vec2 = struct {
 };
 
 pub const vec2z = struct { x: i64, y: i64, z: f64 };
+pub const vec1z = struct {
+    x: i64,
+    z: f64,
+
+    pub fn to_vec2z(self: *const vec1z, y: i64) vec2z {
+        return vec2z{ .x = self.x, .y = y, .z = self.z };
+    }
+};
 
 pub const vec3 = struct { x: f64, y: f64, z: f64 };

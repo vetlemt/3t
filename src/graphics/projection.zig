@@ -26,5 +26,4 @@ pub fn project_point(a: vec3, e: vec3, t: vec3, cc: vec3) vec3 {
         const by = if (dy > 0) 2 * e.y else 0;
         return .{ .x = bx, .y = by, .z = dz };
     }
-    //else return .{ .x = 0, .y = 0, .z = -1 };
 }

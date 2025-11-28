@@ -527,21 +527,47 @@ pub const Cube = struct {
 };
 
 const World = struct {
+    const MAX_PITCH: f64 = std.math.pi / 2.0;
+    const MIN_PITCH: f64 = -std.math.pi / 2.0;
+    const GRAVITY = 0.1;
+    const FRICTION = 0.4;
+
     translation: vec3 = vec3{},
     pitch: f64 = 0,
     yaw: f64 = 0,
+    inertia: vec3 = .{ .x = 0, .y = 0, .z = 0 },
+
+    fn tick(self: *World) void {
+        self.translation.y += self.inertia.y;
+        if (self.translation.y > 0) self.translation.y = 0;
+        self.translation.x += self.inertia.x;
+        self.translation.z += self.inertia.z;
+
+        self.inertia.y += GRAVITY;
+        if (self.inertia.y > 10 * GRAVITY) self.inertia.y = 10 * GRAVITY;
+        if (self.translation.y != 0) return;
+        self.inertia.x *= FRICTION;
+        if (@abs(self.inertia.x) < 0.01) self.inertia.x = 0;
+        self.inertia.z *= FRICTION;
+        if (@abs(self.inertia.z) < 0.01) self.inertia.z = 0;
+    }
 
     fn move(self: *World, distance: vec3) void {
         var q = quaternion.Quaternion.init(0, 0, 1, 0);
         const b = q.rotate_point(distance, self.yaw);
-        self.translation.x += b.x;
-        self.translation.y += b.y;
-        self.translation.z += b.z;
+        self.inertia.x += b.x;
+        self.inertia.y += b.y;
+        self.inertia.z += b.z;
     }
 
     fn look(self: *World, pitch: f64, yaw: f64) void {
-        self.pitch += pitch;
         self.yaw += yaw;
+        self.pitch += pitch;
+        if (self.pitch > MAX_PITCH) {
+            self.pitch = MAX_PITCH;
+        } else if (self.pitch < MIN_PITCH) {
+            self.pitch = MIN_PITCH;
+        }
     }
 };
 
@@ -576,20 +602,20 @@ pub fn main() !void {
 
     var surface = std.ArrayList(vec3).empty;
     defer surface.deinit(allocator);
-    const surf_size = 1000;
+    const surf_size = 2;
     try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = -surf_size });
     try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = -surf_size });
     try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = surf_size });
     try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = surf_size });
 
-    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 52, .z = 50 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
+    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 2, .z = 1 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 1 });
 
-    var cube = try Cube.init(20, .{ .x = 0, .y = 0, .z = 50 }, allocator);
+    var cube = try Cube.init(5, .{ .x = 0, .y = 0, .z = 15 }, allocator);
 
     var itteration: u64 = 0;
     while (!state.isDone()) {
         const t = std.time.microTimestamp();
-
+        world.tick();
         const Verts = struct { verts: std.ArrayList(vec2z), z: f64, color: AtomColor };
         var vert_order = std.ArrayList(Verts).empty;
         defer vert_order.deinit(allocator);
@@ -643,6 +669,7 @@ pub fn main() !void {
             var look_down = false;
             var look_left = false;
             var look_right = false;
+            var jump = false;
             for (input) |c| {
                 std.debug.print("Received: {c}\n", .{c});
                 switch (c) {
@@ -670,6 +697,9 @@ pub fn main() !void {
                     'l' => {
                         look_right = true;
                     },
+                    ' ' => {
+                        jump = true;
+                    },
                     else => {},
                 }
             }
@@ -678,10 +708,11 @@ pub fn main() !void {
             if (move_right) movement.x += 1;
             if (move_forward) movement.z += 1;
             if (move_backward) movement.z -= 1;
+            if (jump and world.translation.y == 0) movement.y += -2;
 
             var yaw: f64 = 0;
             var pitch: f64 = 0;
-            const LOOK_SPEED = 0.1;
+            const LOOK_SPEED = std.math.pi / 32.0;
             if (look_right) yaw += LOOK_SPEED;
             if (look_left) yaw -= LOOK_SPEED;
             if (look_up) pitch += LOOK_SPEED;
@@ -689,6 +720,10 @@ pub fn main() !void {
             world.look(pitch, yaw);
             world.move(movement);
         }
+        std.debug.print("pos {}, {}, {}\n", .{ world.translation.x, world.translation.y, world.translation.z });
+        std.debug.print("inertia {}, {}, {}\n", .{ world.inertia.x, world.inertia.y, world.inertia.z });
+        std.debug.print("pitch {}\n", .{world.pitch});
+        std.debug.print("yaw {}\n", .{world.yaw});
 
         const t_sleep_us = TARGET_PERIOD_US - t_loop;
         if (t_sleep_us > 0) {

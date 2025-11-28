@@ -3,6 +3,7 @@ const std = @import("std");
 const _3t = @import("_3t");
 const ansi = @import("ansi");
 const char = @import("chars");
+const inputs = @import("input");
 const polygon = @import("polygon");
 const Polygon = polygon.Polygon;
 const AtomColor = polygon.AtomColor;
@@ -21,7 +22,7 @@ const SCREEN_DEFAULT_CHAR: u8 = ' ';
 const Edge = struct {
     start: vec2z,
     end: vec2z,
-    atoms: std.ArrayList(vec2z),
+    atoms: std.array_list.Managed(vec2z),
     const z_bias = 0; // Small offset to make edges closer
 
     fn deinit(self: *Edge) void {
@@ -32,7 +33,7 @@ const Edge = struct {
         var edge: Edge = undefined;
         edge.start = start;
         edge.end = end;
-        edge.atoms = std.ArrayList(vec2z).init(allocator);
+        edge.atoms = std.array_list.Managed(vec2z).init(allocator);
         var x0: i64 = start.x;
         var y0: i64 = start.y;
         var x1: i64 = end.x;
@@ -62,9 +63,9 @@ const Edge = struct {
         while (x <= x1) : (x += 1) {
             const px = if (steep) y else x;
             const py = if (steep) x else y;
-            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
-                try edge.atoms.append(.{ .x = px, .y = py, .z = (depth_start + (depth_step * n)) + z_bias });
-            }
+            //if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
+            try edge.atoms.append(.{ .x = px, .y = py, .z = (depth_start + (depth_step * n)) + z_bias });
+            //}
             n += 1.0;
 
             err -= dy;
@@ -104,15 +105,15 @@ const MAX_CHAR_SIZE: usize = 8;
 
 const Char = struct {
     data: *const []const u8 = char.NONE,
-    fg: ansi.Color = ansi.WHITE,
-    bg: ansi.Color = ansi.NONE,
+    fg: AtomColor = AtomColor.NONE,
+    bg: AtomColor = AtomColor.NONE,
 
-    fn init(character: *const []const u8, fg: ansi.Color, bg: ansi.Color) Char {
-        var c: Char = undefined;
-        c.data = character;
-        c.fg = fg;
-        c.bg = bg;
-        return c;
+    fn init(character: *const []const u8, fg: AtomColor, bg: AtomColor) Char {
+        return Char{
+            .data = character,
+            .fg = fg,
+            .bg = bg,
+        };
     }
 };
 
@@ -149,18 +150,38 @@ const Screen = struct {
         }
     }
 
-    fn get_ansi_color(color: AtomColor) ansi.Color {
+    fn get_fg_color_number(color: AtomColor) []const u8 {
         return switch (color) {
-            AtomColor.NONE => ansi.NONE,
-            AtomColor.BLACK => ansi.BLACK,
-            AtomColor.RED => ansi.RED,
-            AtomColor.GREEN => ansi.GREEN,
-            AtomColor.YELLOW => ansi.YELLOW,
-            AtomColor.BLUE => ansi.BLUE,
-            AtomColor.PURPLE => ansi.PURPLE,
-            AtomColor.CYAN => ansi.CYAN,
-            AtomColor.WHITE => ansi.WHITE,
+            AtomColor.NONE => "0",
+            AtomColor.BLACK => "30",
+            AtomColor.RED => "31",
+            AtomColor.GREEN => "32",
+            AtomColor.YELLOW => "33",
+            AtomColor.BLUE => "34",
+            AtomColor.PURPLE => "35",
+            AtomColor.CYAN => "36",
+            AtomColor.WHITE => "37",
         };
+    }
+
+    fn get_bg_color_number(color: AtomColor) []const u8 {
+        return switch (color) {
+            AtomColor.NONE => "0",
+            AtomColor.BLACK => "40",
+            AtomColor.RED => "41",
+            AtomColor.GREEN => "42",
+            AtomColor.YELLOW => "43",
+            AtomColor.BLUE => "44",
+            AtomColor.PURPLE => "45",
+            AtomColor.CYAN => "46",
+            AtomColor.WHITE => "47",
+        };
+    }
+
+    fn format_ansi_color(out: *[32]u8, fg: AtomColor, bg: AtomColor) !void {
+        const background_code = get_bg_color_number(bg);
+        const foreground_code = get_fg_color_number(fg);
+        _ = try std.fmt.bufPrint(out, "\x1B[{s};{s}m\x00\x00", .{ background_code, foreground_code });
     }
 
     fn get_ansi_bg_color(color: AtomColor) ansi.Color {
@@ -182,52 +203,69 @@ const Screen = struct {
             for (0..SCREEN_WIDTH) |xx| {
                 const upper = self.atoms[yy * 2][xx].color;
                 const lower = self.atoms[yy * 2 + 1][xx].color;
-                const upper_fg = get_ansi_color(upper);
-                const lower_fg = get_ansi_color(lower);
-                const lower_bg = get_ansi_bg_color(lower);
 
                 if ((upper == AtomColor.NONE) and (lower == AtomColor.NONE)) { // NOTHING
-                    self.chars[yy][xx] = Char.init(char.NONE, ansi.NONE, ansi.NONE);
+                    self.chars[yy][xx] = Char.init(char.NONE, AtomColor.NONE, AtomColor.NONE);
                 } else if ((upper != AtomColor.NONE) and (lower == AtomColor.NONE)) { // UPPER ONLY
-                    self.chars[yy][xx] = Char.init(char.UPPER, upper_fg, ansi.NONE);
+                    self.chars[yy][xx] = Char.init(char.UPPER, upper, AtomColor.NONE);
                 } else if ((upper == AtomColor.NONE) and (lower != AtomColor.NONE)) { // LOWER ONLY
-                    self.chars[yy][xx] = Char.init(char.LOWER, lower_fg, ansi.NONE);
+                    self.chars[yy][xx] = Char.init(char.LOWER, lower, AtomColor.NONE);
                 } else if (upper == lower) { // UPPER AND LOWER THE SAME
-                    self.chars[yy][xx] = Char.init(char.FULL, upper_fg, ansi.NONE);
+                    self.chars[yy][xx] = Char.init(char.FULL, upper, AtomColor.NONE);
                 } else { // UPPER AND LOWER DIFFERENT
-                    self.chars[yy][xx] = Char.init(char.UPPER, upper_fg, lower_bg);
+                    self.chars[yy][xx] = Char.init(char.UPPER, upper, lower);
                 }
             }
         }
     }
 
     fn print(self: *Screen) !void {
+        var screen_buffer: [SCREEN_WIDTH * SCREEN_HEIGHT * 8]u8 = undefined;
+        var color_buffer: [32]u8 = undefined;
+        try format_ansi_color(&color_buffer, AtomColor.WHITE, AtomColor.NONE);
         //std.debug.print(color.CLEAR.*, .{});
         self.render_sub_pixels();
-        const stdout = std.io.getStdOut();
-        var buffered = std.io.bufferedWriter(stdout.writer());
-        const writer = buffered.writer();
+        var stdout = std.fs.File.stdout().writer(&screen_buffer); // bufferedgit git .writer();
+        const writer = &stdout.interface;
+
         // Clear and home cursor each time (but stay in alt screen)
-        try writer.print("\x1B[2J\x1B[1;1H", .{});
+        try writer.print("\x1B[2J\x1B[1;1H{s}", .{color_buffer});
 
         try writer.print("┌", .{});
         for (0..SCREEN_WIDTH) |_| {
             try writer.print("─", .{});
         }
         try writer.print("┐\n", .{});
+
+        var previous_fg: AtomColor = AtomColor.NONE;
+        var previous_bg: AtomColor = AtomColor.NONE;
+        var bg_has_changed: bool = true;
+        var fg_has_changed: bool = true;
+
         for (self.chars, 0..self.chars.len) |row, i| {
-            try writer.print("│", .{});
+            try format_ansi_color(&color_buffer, AtomColor.WHITE, AtomColor.NONE);
+            try writer.print("{s}│", .{color_buffer});
             for (row) |c| {
-                try writer.print("{s}{s}{s}{s}", .{ c.fg.*, c.bg.*, c.data.*, ansi.RESET.* });
+                bg_has_changed = c.bg != previous_bg;
+                fg_has_changed = c.fg != previous_fg;
+                if (fg_has_changed or bg_has_changed) {
+                    try format_ansi_color(&color_buffer, c.fg, c.bg);
+                    try writer.print("{s}{s}", .{ color_buffer, c.data.* });
+                } else {
+                    try writer.print("{s}", .{c.data.*});
+                }
+                previous_bg = c.bg;
+                previous_fg = c.fg;
             }
-            try writer.print("│{d}\n", .{i});
+            try format_ansi_color(&color_buffer, AtomColor.WHITE, AtomColor.NONE);
+            try writer.print("{s}│{d}\n", .{ color_buffer, i });
         }
         try writer.print("└", .{});
         for (0..SCREEN_WIDTH) |_| {
             try writer.print("─", .{});
         }
-        try writer.print("┘\n", .{});
-        try buffered.flush();
+        try writer.print("┘{s}\n", .{ansi.RESET.*});
+        try writer.flush();
     }
 
     fn fill_x(self: *Screen, start: vec2z, end: vec1z, color: AtomColor) void {
@@ -278,17 +316,17 @@ const Screen = struct {
         average_depth /= @floatFromInt(vertecies.len);
 
         const allocator = std.heap.page_allocator;
-        var edges = std.ArrayList(Edge).init(allocator);
-        defer edges.deinit();
+        var edges = std.ArrayList(Edge).empty;
+        defer edges.deinit(allocator);
 
         for (1..vertecies.len) |i| {
             //std.debug.print("<-- drawing surface edge -->\n", .{});
             const e = try Edge.init(vertecies[i - 1], vertecies[i], allocator);
-            try edges.append(e);
+            try edges.append(allocator, e);
         }
         //std.debug.print("<-- drawing surface edge -->\n", .{});
         const e = try Edge.init(vertecies[vertecies.len - 1], vertecies[0], allocator);
-        try edges.append(e);
+        try edges.append(allocator, e);
 
         var max_y: i64 = std.math.minInt(i64);
         var min_y: i64 = std.math.maxInt(i64);
@@ -313,7 +351,7 @@ const Screen = struct {
                 @intCast(max_y);
 
         for (first_y..last_y + 1) |y| {
-            var intersections = std.ArrayList(vec1z).init(allocator);
+            var intersections = std.array_list.Managed(vec1z).init(allocator);
             defer intersections.deinit();
 
             for (edges.items) |*edge| {
@@ -360,23 +398,23 @@ const Screen = struct {
     }
 
     fn init_terminal() !void {
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.fs.File.stdout();
         // Enter alternate screen and hide cursor
-        try stdout.print("\x1B[?1049h\x1B[?25l", .{});
+        _ = try stdout.write("\x1B[?1049h\x1B[?25l");
         // Optional: Initial clear and home
-        try stdout.print("\x1B[2J\x1B[1;1H", .{});
+        _ = try stdout.write("\x1B[2J\x1B[1;1H");
     }
 
     fn deinit_terminal() !void {
-        const stdout = std.io.getStdOut().writer();
+        const stdout = std.fs.File.stdout();
         // Exit alternate screen, show cursor, reset colors
-        try stdout.print("\x1B[?1049l\x1B[?25h\x1B[0m", .{});
+        _ = try stdout.write("\x1B[?1049l\x1B[?25h\x1B[0m");
         // Optional: Final clear if needed
-        try stdout.print("\x1B[2J\x1B[1;1H", .{});
+        _ = try stdout.write("\x1B[2J\x1B[1;1H");
     }
 };
 
-pub const Cube = struct {
+pub const Floor = struct {
     faces: [6]Polygon,
     pos: vec3 = .{ .x = 0, .y = 0, .z = 5.0 }, // Offset from camera for visibility
 
@@ -431,49 +469,151 @@ pub const Cube = struct {
         };
     }
 };
+
+pub const Cube = struct {
+    faces: [6]Polygon,
+    pos: vec3 = .{ .x = 0, .y = 0, .z = 5.0 }, // Offset from camera for visibility
+
+    pub fn init(side: f64, offset: vec3, allocator: std.mem.Allocator) !Cube {
+        const q = quaternion.Quaternion.init(0, 1, 1, 0); // Identity start
+        const h = side / 2.0; // Half-side for centering at origin
+        const verts = [_]vec3{
+            .{ .x = -h, .y = -h, .z = -h }, // 0: back-bottom-left
+            .{ .x = h, .y = -h, .z = -h }, //- 1: back-bottom-right
+            .{ .x = h, .y = h, .z = -h }, //-- 2: back-top-right
+            .{ .x = -h, .y = h, .z = -h }, //- 3: back-top-left
+            .{ .x = -h, .y = -h, .z = h }, //- 4: front-bottom-left
+            .{ .x = h, .y = -h, .z = h }, //-- 5: front-bottom-right
+            .{ .x = h, .y = h, .z = h }, //--- 6: front-top-right
+            .{ .x = -h, .y = h, .z = h }, //-- 7: front-top-left
+        };
+
+        // Initialize each face as a Polygon
+        var back_verts = std.ArrayList(vec3).empty;
+        try back_verts.ensureTotalCapacity(allocator, 4);
+        try back_verts.appendSlice(allocator, &[_]vec3{ verts[0], verts[1], verts[2], verts[3] });
+
+        var front_verts = std.ArrayList(vec3).empty;
+        try front_verts.ensureTotalCapacity(allocator, 4);
+        try front_verts.appendSlice(allocator, &[_]vec3{ verts[4], verts[5], verts[6], verts[7] });
+
+        var left_verts = std.ArrayList(vec3).empty;
+        try left_verts.ensureTotalCapacity(allocator, 4);
+        try left_verts.appendSlice(allocator, &[_]vec3{ verts[0], verts[3], verts[7], verts[4] });
+
+        var right_verts = std.ArrayList(vec3).empty;
+        try right_verts.ensureTotalCapacity(allocator, 4);
+        try right_verts.appendSlice(allocator, &[_]vec3{ verts[1], verts[2], verts[6], verts[5] });
+
+        var bottom_verts = std.ArrayList(vec3).empty;
+        try bottom_verts.ensureTotalCapacity(allocator, 4);
+        try bottom_verts.appendSlice(allocator, &[_]vec3{ verts[0], verts[1], verts[5], verts[4] });
+
+        var top_verts = std.ArrayList(vec3).empty;
+        try top_verts.ensureTotalCapacity(allocator, 4);
+        try top_verts.appendSlice(allocator, &[_]vec3{ verts[3], verts[2], verts[6], verts[7] });
+
+        return .{
+            .faces = [_]Polygon{
+                Polygon.init(back_verts, AtomColor.RED, offset, q),
+                Polygon.init(front_verts, AtomColor.GREEN, offset, q),
+                Polygon.init(left_verts, AtomColor.BLUE, offset, q),
+                Polygon.init(right_verts, AtomColor.YELLOW, offset, q),
+                Polygon.init(bottom_verts, AtomColor.PURPLE, offset, q),
+                Polygon.init(top_verts, AtomColor.CYAN, offset, q),
+            },
+        };
+    }
+};
+
+const World = struct {
+    translation: vec3 = vec3{},
+    pitch: f64 = 0,
+    yaw: f64 = 0,
+
+    fn move(self: *World, distance: vec3) void {
+        var q = quaternion.Quaternion.init(0, 0, 1, 0);
+        const b = q.rotate_point(distance, self.yaw);
+        self.translation.x += b.x;
+        self.translation.y += b.y;
+        self.translation.z += b.z;
+    }
+
+    fn look(self: *World, pitch: f64, yaw: f64) void {
+        self.pitch += pitch;
+        self.yaw += yaw;
+    }
+};
+
+const TARGET_FRAME_RATE: i64 = 60;
+const TARGET_PERIOD_US: i64 = @truncate(1_000_000 / TARGET_FRAME_RATE);
+
 pub fn main() !void {
     var screen = Screen{};
     try Screen.init_terminal();
+    defer Screen.deinit_terminal() catch |err| {
+        std.debug.print("Failed to restore terminal: {}\n", .{err});
+    };
+
+    var world = World{};
 
     const allocator = std.heap.page_allocator;
-    var surface = std.ArrayList(vec3).init(allocator);
-    defer surface.deinit();
-    const surf_size = 100;
-    try surface.append(.{ .x = -surf_size, .y = 0, .z = 10 * surf_size });
-    try surface.append(.{ .x = surf_size, .y = 0, .z = 10 * surf_size });
-    try surface.append(.{ .x = surf_size, .y = 0, .z = 20 });
-    try surface.append(.{ .x = -surf_size, .y = 0, .z = 20 });
 
-    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 50, .z = 0 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
+    // Initialize shared state
+    var state = inputs.InputState.init();
+
+    // Enable raw mode
+    const original_term = try inputs.enableRawMode();
+    defer inputs.restoreTerminal(original_term) catch |err| {
+        std.debug.print("Failed to restore terminal: {}\n", .{err});
+    };
+
+    // Spawn input reading thread
+    const thread = try std.Thread.spawn(.{}, inputs.readInput, .{&state});
+    defer thread.join();
+
+    std.debug.print("Exiting...\n", .{});
+
+    var surface = std.ArrayList(vec3).empty;
+    defer surface.deinit(allocator);
+    const surf_size = 1000;
+    try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = -surf_size });
+    try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = -surf_size });
+    try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = surf_size });
+    try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = surf_size });
+
+    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 52, .z = 50 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 0 });
 
     var cube = try Cube.init(20, .{ .x = 0, .y = 0, .z = 50 }, allocator);
 
     var itteration: u64 = 0;
-    var running: bool = true;
-    while (running) {
+    while (!state.isDone()) {
         const t = std.time.microTimestamp();
+
         const Verts = struct { verts: std.ArrayList(vec2z), z: f64, color: AtomColor };
-        var vert_order = std.ArrayList(Verts).init(allocator);
-        defer vert_order.deinit();
+        var vert_order = std.ArrayList(Verts).empty;
+        defer vert_order.deinit(allocator);
         {
-            const verts = try floor.projection(allocator);
+            const verts = try floor.projection(world.translation, world.pitch, world.yaw, allocator);
             var z: f64 = 0;
             for (verts.items) |*v| {
                 z += v.z;
             }
             z /= @floatFromInt(verts.items.len);
-            try vert_order.append(.{ .verts = verts, .z = z, .color = floor.color });
+            try vert_order.append(allocator, .{ .verts = verts, .z = z, .color = floor.color });
         }
 
         for (&cube.faces) |*poly| {
             poly.*.transform(60); //30
-            const verts = try poly.*.projection(allocator);
+            const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
             var z: f64 = 0;
             for (verts.items) |*v| {
                 z += v.z;
             }
             z /= @floatFromInt(verts.items.len);
-            try vert_order.append(.{ .verts = verts, .z = z, .color = poly.color });
+            if (z > 0) {
+                try vert_order.append(allocator, .{ .verts = verts, .z = z, .color = poly.color });
+            }
         }
 
         std.sort.heap(Verts, vert_order.items, {}, struct {
@@ -488,14 +628,75 @@ pub fn main() !void {
 
         try screen.print();
         screen.clear();
-        const t2 = std.time.microTimestamp();
-        std.debug.print("render time µs {}\n", .{t2 - t});
+        const t_loop = std.time.microTimestamp() - t;
+        std.debug.print("render time µs {}\n", .{t_loop});
         std.debug.print("itteration {}\n", .{itteration});
-        std.time.sleep(16_666_666);
+        if (state.input_len > 0) {
+            const input = try state.getInput(allocator);
+            defer allocator.free(input);
+
+            var move_left = false;
+            var move_right = false;
+            var move_forward = false;
+            var move_backward = false;
+            var look_up = false;
+            var look_down = false;
+            var look_left = false;
+            var look_right = false;
+            for (input) |c| {
+                std.debug.print("Received: {c}\n", .{c});
+                switch (c) {
+                    'w' => {
+                        move_forward = true;
+                    },
+                    'a' => {
+                        move_left = true;
+                    },
+                    's' => {
+                        move_backward = true;
+                    },
+                    'd' => {
+                        move_right = true;
+                    },
+                    'i' => {
+                        look_up = true;
+                    },
+                    'k' => {
+                        look_down = true;
+                    },
+                    'j' => {
+                        look_left = true;
+                    },
+                    'l' => {
+                        look_right = true;
+                    },
+                    else => {},
+                }
+            }
+            var movement = vec3{};
+            if (move_left) movement.x -= 1;
+            if (move_right) movement.x += 1;
+            if (move_forward) movement.z += 1;
+            if (move_backward) movement.z -= 1;
+
+            var yaw: f64 = 0;
+            var pitch: f64 = 0;
+            const LOOK_SPEED = 0.1;
+            if (look_right) yaw += LOOK_SPEED;
+            if (look_left) yaw -= LOOK_SPEED;
+            if (look_up) pitch += LOOK_SPEED;
+            if (look_down) pitch -= LOOK_SPEED;
+            world.look(pitch, yaw);
+            world.move(movement);
+        }
+
+        const t_sleep_us = TARGET_PERIOD_US - t_loop;
+        if (t_sleep_us > 0) {
+            const t_sleep_ns: u64 = @as(u64, @intCast(t_sleep_us)) * 1000;
+            std.Thread.sleep(t_sleep_ns);
+        }
         itteration += 1;
-        running = true;
     }
-    //try Screen.deinit_terminal();
 }
 
 test "simple test" {

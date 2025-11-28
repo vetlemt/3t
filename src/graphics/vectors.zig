@@ -32,4 +32,4 @@ pub const vec1z = struct {
     }
 };
 
-pub const vec3 = struct { x: f64, y: f64, z: f64 };
+pub const vec3 = struct { x: f64 = 0, y: f64 = 0, z: f64 = 0 };

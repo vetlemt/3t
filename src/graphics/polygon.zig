@@ -48,17 +48,17 @@ pub const Polygon = struct {
         return polygon;
     }
 
-    pub fn projection(self: *Polygon, allocator: std.mem.Allocator) !std.ArrayList(vec2z) {
-        var projected = std.ArrayList(vec2z).init(allocator);
+    pub fn projection(self: *Polygon, translation: vec3, pitch: f64, yaw: f64, allocator: std.mem.Allocator) !std.ArrayList(vec2z) {
+        var projected = std.ArrayList(vec2z).empty;
 
         const fov = 2.0 * std.math.pi / 5.0; //* 72 deg */
-        const ez = std.math.tan(1.0 / (fov / 2.0));
-        const e = vec3{ .x = 64, .y = 32, .z = -ez };
-        const t = vec3{ .x = 0, .y = 0, .z = 0 };
+        const ez = 64.0 / std.math.tan(fov / 2.0);
+        const e = vec3{ .x = 64, .y = 32, .z = ez };
+        const t = vec3{ .x = pitch, .y = yaw, .z = 0 };
         for (self.vertices.items) |v| {
             const a = vec3{ .x = v.x + self.offset.x, .y = v.y + self.offset.y, .z = v.z + self.offset.z };
-            const p = projecting.project_point(a, e, t);
-            try projected.append(.{
+            const p = projecting.project_point(a, e, t, translation);
+            try projected.append(allocator, .{
                 .x = @intFromFloat(p.x),
                 .y = @intFromFloat(p.y),
                 .z = p.z,

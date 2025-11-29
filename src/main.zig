@@ -545,7 +545,7 @@ pub const Cube = struct {
 const World = struct {
     const MAX_PITCH: f64 = std.math.pi / 2.0;
     const MIN_PITCH: f64 = -std.math.pi / 2.0;
-    const GRAVITY = 0.03;
+    const GRAVITY = 0.015;
     const FRICTION = 0.2;
     const CAMERA_RESISTANCE = 0.5;
 
@@ -555,6 +555,10 @@ const World = struct {
     inertia: vec3 = .{ .x = 0, .y = 0, .z = 0 },
     pitch_inertia: f64 = 0,
     yaw_inertia: f64 = 0,
+
+    fn standing(self: *World) bool {
+        return self.translation.y == 0;
+    }
 
     fn tick(self: *World) void {
         self.pitch += self.pitch_inertia;
@@ -578,11 +582,18 @@ const World = struct {
 
         self.inertia.y += GRAVITY;
         if (self.inertia.y > 8 * GRAVITY) self.inertia.y = 8 * GRAVITY;
-        if (self.translation.y != 0) return;
-        self.inertia.x *= FRICTION;
-        if (@abs(self.inertia.x) < 0.01) self.inertia.x = 0;
-        self.inertia.z *= FRICTION;
-        if (@abs(self.inertia.z) < 0.01) self.inertia.z = 0;
+
+        if (self.standing()) {
+            self.inertia.x *= FRICTION;
+            if (@abs(self.inertia.x) < 0.01) self.inertia.x = 0;
+            self.inertia.z *= FRICTION;
+            if (@abs(self.inertia.z) < 0.01) self.inertia.z = 0;
+        } else {
+            self.inertia.x *= FRICTION;
+            if (@abs(self.inertia.x) < 0.01) self.inertia.x = 0;
+            self.inertia.z *= FRICTION;
+            if (@abs(self.inertia.z) < 0.01) self.inertia.z = 0;
+        }
     }
 
     fn move(self: *World, distance: vec3) void {
@@ -622,8 +633,10 @@ pub fn main() !void {
     //};
 
     // Spawn input reading thread
-    const thread = try std.Thread.spawn(.{}, inputs.readInput, .{&state});
-    defer thread.join();
+    const kbd_thread = try std.Thread.spawn(.{}, inputs.read_keyboard_input_thread, .{&state});
+    defer kbd_thread.join();
+    const mouse_thread = try std.Thread.spawn(.{}, inputs.read_mouse_input_thread, .{&state});
+    defer mouse_thread.join();
 
     std.debug.print("Exiting...\n", .{});
     const floor = try Floor.init(2, 5, 5, .{ .x = -5, .y = 1, .z = 0 }, allocator);
@@ -684,32 +697,34 @@ pub fn main() !void {
             const move_right = keys.d;
             const move_forward = keys.w;
             const move_backward = keys.s;
-            const look_up = false;
-            const look_down = false;
-            const look_left = false;
-            const look_right = false;
+
             const jump = keys.space;
 
             const MOVE_SPEED = 0.1;
             const JUMP_FORCE = 0.3;
             var movement = vec3{};
+
             if (move_left) movement.x -= MOVE_SPEED;
             if (move_right) movement.x += MOVE_SPEED;
             if (move_forward) movement.z += MOVE_SPEED;
             if (move_backward) movement.z -= MOVE_SPEED;
 
+            const root2 = std.math.sqrt(2);
+            if ((move_forward ^ move_backward) & (move_left ^ move_right)) {
+                movement.x *= root2;
+                movement.z *= root2;
+            }
+
             if (jump and world.translation.y == 0) movement.y -= JUMP_FORCE;
 
-            var yaw: f64 = 0;
-            var pitch: f64 = 0;
-            const LOOK_SPEED = std.math.pi / 32.0;
-            if (look_right) yaw += LOOK_SPEED;
-            if (look_left) yaw -= LOOK_SPEED;
-            if (look_up) pitch += LOOK_SPEED;
-            if (look_down) pitch -= LOOK_SPEED;
+            const mouse_movement = state.get_mouse_movement();
+            const LOOK_SPEED = 0.002;
+            const yaw: f64 = LOOK_SPEED * mouse_movement.x;
+            const pitch: f64 = LOOK_SPEED * -mouse_movement.y;
             world.look(pitch, yaw);
             world.move(movement);
         }
+
         //std.debug.print("pos {}, {}, {}\n", .{ world.translation.x, world.translation.y, world.translation.z });
         //std.debug.print("inertia {}, {}, {}\n", .{ world.inertia.x, world.inertia.y, world.inertia.z });
         //std.debug.print("pitch {}\n", .{world.pitch});

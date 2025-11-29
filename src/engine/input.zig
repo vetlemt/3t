@@ -5,6 +5,9 @@ const posix = std.posix;
 const Thread = std.Thread;
 const Allocator = std.mem.Allocator;
 
+const vectors = @import("vectors");
+const vec2 = vectors.vec2;
+
 //const c = @cImport(@cInclude("device_events.h"));
 // Structure to hold shared state between threads
 
@@ -40,6 +43,8 @@ pub const InputState = struct {
     mutex: Thread.Mutex,
     done: bool = false,
     keys: InputKeys,
+    mouse_movement: vec2,
+
     pub fn init() InputState {
         var s: InputState = undefined;
         s.mutex = Thread.Mutex{};
@@ -116,6 +121,24 @@ pub const InputState = struct {
         return self.keys;
     }
 
+    fn register_mouse_movement(self: *InputState, amount: i32, is_x: bool) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        if (is_x) {
+            self.mouse_movement.x += @floatFromInt(amount);
+        } else self.mouse_movement.y += @floatFromInt(amount);
+    }
+
+    pub fn get_mouse_movement(self: *InputState) vec2 {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const movement = self.mouse_movement;
+        self.mouse_movement.x = 0;
+        self.mouse_movement.y = 0;
+        return movement;
+    }
+
     pub fn getInput(self: *InputState, allocator: Allocator) ![]u8 {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -160,11 +183,7 @@ pub fn restoreTerminal(original: posix.termios) !void {
 }
 
 // Thread function to read input
-pub fn readInput(state: *InputState) !void {
-    //var mouse_dev = try std.fs.openFileAbsolute("/dev/input/event6", .{});
-    //defer mouse_dev.close();
-    //var mouse_reader = mouse_dev.reader(&.{});
-
+pub fn read_keyboard_input_thread(state: *InputState) !void {
     var keyboard_dev = try std.fs.openFileAbsolute("/dev/input/event16", .{});
     defer keyboard_dev.close();
     var keyboard_reader = keyboard_dev.reader(&.{});
@@ -179,15 +198,9 @@ pub fn readInput(state: *InputState) !void {
     var e: Event = undefined;
     var buffer: [24]u8 = undefined;
     while (!state.isDone()) {
-        //try mouse_reader.interface.readSliceAll(&buffer);
-        //@memcpy(std.mem.asBytes(&e), &buffer);
-        //std.debug.print(" mouse: type {x}, code {x} value {x}\n", .{ e.e_type, e.code, e.value });
-
         try keyboard_reader.interface.readSliceAll(&buffer);
-        //@memcpy(std.mem.asBytes(&e.tv_sec), &buffer[0..8]);
-
         @memcpy(std.mem.asBytes(&e), &buffer);
-        std.debug.print(" keyboard: {}.{} type {}, code {} value {}\n", .{ e.tv_sec, e.tv_usec, e.e_type, e.code, e.value });
+        //std.debug.print(" keyboard: {}.{} type {}, code {} value {}\n", .{ e.tv_sec, e.tv_usec, e.e_type, e.code, e.value });
 
         switch (e.code) {
             1 => {
@@ -211,17 +224,37 @@ pub fn readInput(state: *InputState) !void {
             },
             else => {},
         }
+    }
+}
 
-        //std.debug.print("{} {} {} {} {} {} {} {}, {} {} {} {} {} {} {} {}, {} {} {} {} {} {} {} {}\n", .{ buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], buffer[8], buffer[9], buffer[10], buffer[11], buffer[12], buffer[13], buffer[14], buffer[15], buffer[16], buffer[17], buffer[18], buffer[19], buffer[20], buffer[21], buffer[22], buffer[23] });
+// Thread function to read input
+pub fn read_mouse_input_thread(state: *InputState) !void {
+    var mouse_dev = try std.fs.openFileAbsolute("/dev/input/event6", .{});
+    defer mouse_dev.close();
+    var mouse_reader = mouse_dev.reader(&.{});
 
-        //reader.readSliceAll(&byte) catch |err| {
-        //    std.debug.print("Error reading input: {}\n", .{err});
-        //    return;
-        //};
-        //state.append(byte[0]);
-        //if (byte[0] == 'q') { // Exit on 'q'
-        //    state.setDone();
-        //    break;
-        //}
+    const Event = extern struct {
+        tv_sec: u64,
+        tv_usec: u64,
+        e_type: u16,
+        code: u16,
+        value: i32,
+    };
+    var e: Event = undefined;
+    var buffer: [24]u8 = undefined;
+    while (!state.isDone()) {
+        try mouse_reader.interface.readSliceAll(&buffer);
+        @memcpy(std.mem.asBytes(&e), &buffer);
+        //std.debug.print(" mouse: type {x}, code {x} value {x}\n", .{ e.e_type, e.code, e.value });
+
+        switch (e.code) {
+            0 => {
+                state.register_mouse_movement(e.value, true);
+            },
+            1 => {
+                state.register_mouse_movement(e.value, false);
+            },
+            else => {},
+        }
     }
 }

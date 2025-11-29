@@ -67,6 +67,9 @@ pub fn build(b: *std.Build) void {
 
     const input_module = b.addModule("input", .{
         .root_source_file = b.path("src/engine/input.zig"),
+        .imports = &.{
+            .{ .name = "vectors", .module = vectors_module },
+        },
         .target = target,
     });
 

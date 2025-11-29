@@ -23,7 +23,7 @@ const Edge = struct {
     start: vec2z,
     end: vec2z,
     atoms: std.array_list.Managed(vec2z),
-    const z_bias = 0; // Small offset to make edges closer
+    const z_bias = 0.01; // Small offset to make edges closer
 
     fn deinit(self: *Edge) void {
         self.atoms.deinit();
@@ -397,6 +397,34 @@ const Screen = struct {
         //self.emplace(vertecies, AtomColor.GREEN);
     }
 
+    fn draw_lines(self: *Screen, vertecies: []vec2z, color: AtomColor) !void {
+        var average_depth: f64 = 0;
+        for (0..vertecies.len) |i| {
+            average_depth += vertecies[i].z;
+        }
+        average_depth /= @floatFromInt(vertecies.len);
+
+        const allocator = std.heap.page_allocator;
+        var edges = std.ArrayList(Edge).empty;
+        defer edges.deinit(allocator);
+
+        for (1..vertecies.len) |i| {
+            //std.debug.print("<-- drawing surface edge -->\n", .{});
+            const e = try Edge.init(vertecies[i - 1], vertecies[i], allocator);
+            try edges.append(allocator, e);
+        }
+        //std.debug.print("<-- drawing surface edge -->\n", .{});
+        const e = try Edge.init(vertecies[vertecies.len - 1], vertecies[0], allocator);
+        try edges.append(allocator, e);
+
+        // free edges
+        for (edges.items) |*edge| {
+            self.emplace(edge.atoms.items, color);
+            edge.deinit();
+        }
+        //self.emplace(vertecies, AtomColor.GREEN);
+    }
+
     fn init_terminal() !void {
         const stdout = std.fs.File.stdout();
         // Enter alternate screen and hide cursor
@@ -415,67 +443,55 @@ const Screen = struct {
 };
 
 pub const Floor = struct {
-    faces: [6]Polygon,
-    pos: vec3 = .{ .x = 0, .y = 0, .z = 5.0 }, // Offset from camera for visibility
+    faces: std.ArrayList(Polygon),
+    tile: std.ArrayList(vec3),
 
-    pub fn init(side: f64, offset: vec3, allocator: std.mem.Allocator) !Cube {
-        const q = quaternion.Quaternion.init(0, 1, 1, 0); // Identity start
-        const h = side / 2.0; // Half-side for centering at origin
-        const verts = [_]vec3{
-            .{ .x = -h, .y = -h, .z = -h }, // 0: back-bottom-left
-            .{ .x = h, .y = -h, .z = -h }, //- 1: back-bottom-right
-            .{ .x = h, .y = h, .z = -h }, //-- 2: back-top-right
-            .{ .x = -h, .y = h, .z = -h }, //- 3: back-top-left
-            .{ .x = -h, .y = -h, .z = h }, //- 4: front-bottom-left
-            .{ .x = h, .y = -h, .z = h }, //-- 5: front-bottom-right
-            .{ .x = h, .y = h, .z = h }, //--- 6: front-top-right
-            .{ .x = -h, .y = h, .z = h }, //-- 7: front-top-left
-        };
+    pub fn init(tile_size: f64, width: u32, height: u32, offset: vec3, allocator: std.mem.Allocator) !Floor {
+        const q = quaternion.Quaternion.init(1, 0, 0, 0); // Identity start
 
         // Initialize each face as a Polygon
-        var back_verts = std.ArrayList(vec3).init(allocator);
-        try back_verts.ensureTotalCapacity(4);
-        try back_verts.appendSlice(&[_]vec3{ verts[0], verts[1], verts[2], verts[3] });
+        const h = tile_size / 2.0;
+        var floor: Floor = undefined;
+        floor.tile = std.ArrayList(vec3).empty;
+        try floor.tile.append(allocator, .{ .x = -h, .y = 0, .z = -h });
+        try floor.tile.append(allocator, .{ .x = h, .y = 0, .z = -h });
+        try floor.tile.append(allocator, .{ .x = h, .y = 0, .z = h });
+        try floor.tile.append(allocator, .{ .x = -h, .y = 0, .z = h });
 
-        var front_verts = std.ArrayList(vec3).init(allocator);
-        try front_verts.ensureTotalCapacity(4);
-        try front_verts.appendSlice(&[_]vec3{ verts[4], verts[5], verts[6], verts[7] });
+        floor.faces = std.ArrayList(Polygon).empty;
+        var oz: f64 = 0.0;
+        var ox: f64 = 0.0;
+        for (0..height) |_| {
+            oz += tile_size;
+            ox = 0;
+            for (0..width) |_| {
+                ox += tile_size;
+                try floor.faces.append(allocator, Polygon.init(floor.tile, AtomColor.WHITE, .{ .x = offset.x + ox, .y = offset.y, .z = offset.z + oz }, q));
+            }
+        }
+        return floor;
 
-        var left_verts = std.ArrayList(vec3).init(allocator);
-        try left_verts.ensureTotalCapacity(4);
-        try left_verts.appendSlice(&[_]vec3{ verts[0], verts[3], verts[7], verts[4] });
-
-        var right_verts = std.ArrayList(vec3).init(allocator);
-        try right_verts.ensureTotalCapacity(4);
-        try right_verts.appendSlice(&[_]vec3{ verts[1], verts[2], verts[6], verts[5] });
-
-        var bottom_verts = std.ArrayList(vec3).init(allocator);
-        try bottom_verts.ensureTotalCapacity(4);
-        try bottom_verts.appendSlice(&[_]vec3{ verts[0], verts[1], verts[5], verts[4] });
-
-        var top_verts = std.ArrayList(vec3).init(allocator);
-        try top_verts.ensureTotalCapacity(4);
-        try top_verts.appendSlice(&[_]vec3{ verts[3], verts[2], verts[6], verts[7] });
-
-        return .{
-            .faces = [_]Polygon{
-                Polygon.init(back_verts, AtomColor.RED, offset, q),
-                Polygon.init(front_verts, AtomColor.GREEN, offset, q),
-                Polygon.init(left_verts, AtomColor.BLUE, offset, q),
-                Polygon.init(right_verts, AtomColor.YELLOW, offset, q),
-                Polygon.init(bottom_verts, AtomColor.PURPLE, offset, q),
-                Polygon.init(top_verts, AtomColor.CYAN, offset, q),
-            },
-        };
+        //return .{
+        //    .faces = [_]Polygon{
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x + tile_size, .y = offset.y, .z = offset.z - tile_size }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x + tile_size, .y = offset.y, .z = offset.z }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x + tile_size, .y = offset.y, .z = offset.z + tile_size }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x, .y = offset.y, .z = offset.z - tile_size }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x, .y = offset.y, .z = offset.z }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x, .y = offset.y, .z = offset.z + tile_size }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x - tile_size, .y = offset.y, .z = offset.z - tile_size }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x - tile_size, .y = offset.y, .z = offset.z }, q),
+        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x - tile_size, .y = offset.y, .z = offset.z + tile_size }, q),
+        //    },
+        //};
     }
 };
 
 pub const Cube = struct {
     faces: [6]Polygon,
-    pos: vec3 = .{ .x = 0, .y = 0, .z = 5.0 }, // Offset from camera for visibility
 
     pub fn init(side: f64, offset: vec3, allocator: std.mem.Allocator) !Cube {
-        const q = quaternion.Quaternion.init(0, 1, 1, 0); // Identity start
+        const q = quaternion.Quaternion.init(0, 1, 1, 1); // Identity start
         const h = side / 2.0; // Half-side for centering at origin
         const verts = [_]vec3{
             .{ .x = -h, .y = -h, .z = -h }, // 0: back-bottom-left
@@ -611,17 +627,7 @@ pub fn main() !void {
     defer thread.join();
 
     std.debug.print("Exiting...\n", .{});
-
-    var surface = std.ArrayList(vec3).empty;
-    defer surface.deinit(allocator);
-    const surf_size = 2;
-    try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = -surf_size });
-    try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = -surf_size });
-    try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = surf_size });
-    try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = surf_size });
-
-    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 1, .z = 1 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 1 });
-
+    const floor = try Floor.init(1, 10, 10, .{ .x = -5, .y = 1, .z = 0 }, allocator);
     var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 3 }, allocator);
 
     var itteration: u64 = 0;
@@ -631,14 +637,14 @@ pub fn main() !void {
         const Verts = struct { verts: std.ArrayList(vec2z), z: f64, color: AtomColor };
         var vert_order = std.ArrayList(Verts).empty;
         defer vert_order.deinit(allocator);
-        {
-            const verts = try floor.projection(world.translation, world.pitch, world.yaw, allocator);
+        for (floor.faces.items) |*poly| {
+            const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
             var z: f64 = 0;
             for (verts.items) |*v| {
                 z += v.z;
             }
             z /= @floatFromInt(verts.items.len);
-            try vert_order.append(allocator, .{ .verts = verts, .z = z, .color = floor.color });
+            try vert_order.append(allocator, .{ .verts = verts, .z = z, .color = poly.color });
         }
 
         for (&cube.faces) |*poly| {
@@ -663,6 +669,9 @@ pub fn main() !void {
         for (vert_order.items) |*v| {
             try screen.draw_surface(v.verts.items, v.color);
         }
+        //for (vert_order.items) |*v| {
+        //    try screen.draw_lines(v.verts.items, AtomColor.BLACK);
+        //}
 
         try screen.print();
         screen.clear();

@@ -391,7 +391,7 @@ const Screen = struct {
 
         // free edges
         for (edges.items) |*edge| {
-            //self.emplace(edge.atoms.items, colors[i]);
+            self.emplace(edge.atoms.items, AtomColor.BLACK);
             edge.deinit();
         }
         //self.emplace(vertecies, AtomColor.GREEN);
@@ -529,22 +529,39 @@ pub const Cube = struct {
 const World = struct {
     const MAX_PITCH: f64 = std.math.pi / 2.0;
     const MIN_PITCH: f64 = -std.math.pi / 2.0;
-    const GRAVITY = 0.1;
-    const FRICTION = 0.4;
+    const GRAVITY = 0.05;
+    const FRICTION = 0.8;
+    const CAMERA_RESISTANCE = 0.5;
 
     translation: vec3 = vec3{},
     pitch: f64 = 0,
     yaw: f64 = 0,
     inertia: vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    pitch_inertia: f64 = 0,
+    yaw_inertia: f64 = 0,
 
     fn tick(self: *World) void {
+        self.pitch += self.pitch_inertia;
+        self.yaw += self.yaw_inertia;
+        if (self.pitch > MAX_PITCH) {
+            self.pitch = MAX_PITCH;
+        } else if (self.pitch < MIN_PITCH) {
+            self.pitch = MIN_PITCH;
+        }
+
         self.translation.y += self.inertia.y;
         if (self.translation.y > 0) self.translation.y = 0;
         self.translation.x += self.inertia.x;
         self.translation.z += self.inertia.z;
 
+        self.yaw_inertia *= CAMERA_RESISTANCE;
+        if (@abs(self.yaw_inertia) < 0.01) self.yaw_inertia = 0;
+
+        self.pitch_inertia *= CAMERA_RESISTANCE;
+        if (@abs(self.pitch_inertia) < 0.01) self.pitch_inertia = 0;
+
         self.inertia.y += GRAVITY;
-        if (self.inertia.y > 10 * GRAVITY) self.inertia.y = 10 * GRAVITY;
+        if (self.inertia.y > 8 * GRAVITY) self.inertia.y = 8 * GRAVITY;
         if (self.translation.y != 0) return;
         self.inertia.x *= FRICTION;
         if (@abs(self.inertia.x) < 0.01) self.inertia.x = 0;
@@ -561,13 +578,8 @@ const World = struct {
     }
 
     fn look(self: *World, pitch: f64, yaw: f64) void {
-        self.yaw += yaw;
-        self.pitch += pitch;
-        if (self.pitch > MAX_PITCH) {
-            self.pitch = MAX_PITCH;
-        } else if (self.pitch < MIN_PITCH) {
-            self.pitch = MIN_PITCH;
-        }
+        self.yaw_inertia += yaw;
+        self.pitch_inertia += pitch;
     }
 };
 
@@ -608,9 +620,9 @@ pub fn main() !void {
     try surface.append(allocator, .{ .x = surf_size, .y = 0, .z = surf_size });
     try surface.append(allocator, .{ .x = -surf_size, .y = 0, .z = surf_size });
 
-    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 2, .z = 1 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 1 });
+    var floor = Polygon.init(surface, AtomColor.WHITE, .{ .x = 0, .y = 1, .z = 1 }, quaternion.Quaternion{ .a = 0, .b = 1, .c = 1, .d = 1 });
 
-    var cube = try Cube.init(5, .{ .x = 0, .y = 0, .z = 15 }, allocator);
+    var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 3 }, allocator);
 
     var itteration: u64 = 0;
     while (!state.isDone()) {
@@ -673,28 +685,28 @@ pub fn main() !void {
             for (input) |c| {
                 std.debug.print("Received: {c}\n", .{c});
                 switch (c) {
-                    'w' => {
+                    'w', 'W' => {
                         move_forward = true;
                     },
-                    'a' => {
+                    'a', 'A' => {
                         move_left = true;
                     },
-                    's' => {
+                    's', 'S' => {
                         move_backward = true;
                     },
-                    'd' => {
+                    'd', 'D' => {
                         move_right = true;
                     },
-                    'i' => {
+                    'i', 'I' => {
                         look_up = true;
                     },
-                    'k' => {
+                    'k', 'K' => {
                         look_down = true;
                     },
-                    'j' => {
+                    'j', 'J' => {
                         look_left = true;
                     },
-                    'l' => {
+                    'l', 'L' => {
                         look_right = true;
                     },
                     ' ' => {
@@ -703,12 +715,14 @@ pub fn main() !void {
                     else => {},
                 }
             }
+            const MOVE_SPEED = 0.1;
+            const JUMP_FORCE = 0.8;
             var movement = vec3{};
-            if (move_left) movement.x -= 1;
-            if (move_right) movement.x += 1;
-            if (move_forward) movement.z += 1;
-            if (move_backward) movement.z -= 1;
-            if (jump and world.translation.y == 0) movement.y += -2;
+            if (move_left) movement.x -= MOVE_SPEED;
+            if (move_right) movement.x += MOVE_SPEED;
+            if (move_forward) movement.z += MOVE_SPEED;
+            if (move_backward) movement.z -= MOVE_SPEED;
+            if (jump and world.translation.y == 0) movement.y -= JUMP_FORCE;
 
             var yaw: f64 = 0;
             var pitch: f64 = 0;

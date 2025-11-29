@@ -545,8 +545,8 @@ pub const Cube = struct {
 const World = struct {
     const MAX_PITCH: f64 = std.math.pi / 2.0;
     const MIN_PITCH: f64 = -std.math.pi / 2.0;
-    const GRAVITY = 0.05;
-    const FRICTION = 0.8;
+    const GRAVITY = 0.03;
+    const FRICTION = 0.2;
     const CAMERA_RESISTANCE = 0.5;
 
     translation: vec3 = vec3{},
@@ -612,22 +612,21 @@ pub fn main() !void {
     var world = World{};
 
     const allocator = std.heap.page_allocator;
-
     // Initialize shared state
     var state = inputs.InputState.init();
 
     // Enable raw mode
-    const original_term = try inputs.enableRawMode();
-    defer inputs.restoreTerminal(original_term) catch |err| {
-        std.debug.print("Failed to restore terminal: {}\n", .{err});
-    };
+    //const original_term = try inputs.enableRawMode();
+    //defer inputs.restoreTerminal(original_term) catch |err| {
+    //    std.debug.print("Failed to restore terminal: {}\n", .{err});
+    //};
 
     // Spawn input reading thread
     const thread = try std.Thread.spawn(.{}, inputs.readInput, .{&state});
     defer thread.join();
 
     std.debug.print("Exiting...\n", .{});
-    const floor = try Floor.init(1, 10, 10, .{ .x = -5, .y = 1, .z = 0 }, allocator);
+    const floor = try Floor.init(2, 5, 5, .{ .x = -5, .y = 1, .z = 0 }, allocator);
     var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 3 }, allocator);
 
     var itteration: u64 = 0;
@@ -676,61 +675,29 @@ pub fn main() !void {
         try screen.print();
         screen.clear();
         const t_loop = std.time.microTimestamp() - t;
-        std.debug.print("render time µs {}\n", .{t_loop});
-        std.debug.print("itteration {}\n", .{itteration});
-        if (state.input_len > 0) {
-            const input = try state.getInput(allocator);
-            defer allocator.free(input);
+        //std.debug.print("render time µs {}\n", .{t_loop});
+        //std.debug.print("itteration {}\n", .{itteration});
+        {
+            const keys = state.get_keys();
 
-            var move_left = false;
-            var move_right = false;
-            var move_forward = false;
-            var move_backward = false;
-            var look_up = false;
-            var look_down = false;
-            var look_left = false;
-            var look_right = false;
-            var jump = false;
-            for (input) |c| {
-                std.debug.print("Received: {c}\n", .{c});
-                switch (c) {
-                    'w', 'W' => {
-                        move_forward = true;
-                    },
-                    'a', 'A' => {
-                        move_left = true;
-                    },
-                    's', 'S' => {
-                        move_backward = true;
-                    },
-                    'd', 'D' => {
-                        move_right = true;
-                    },
-                    'i', 'I' => {
-                        look_up = true;
-                    },
-                    'k', 'K' => {
-                        look_down = true;
-                    },
-                    'j', 'J' => {
-                        look_left = true;
-                    },
-                    'l', 'L' => {
-                        look_right = true;
-                    },
-                    ' ' => {
-                        jump = true;
-                    },
-                    else => {},
-                }
-            }
+            const move_left = keys.a;
+            const move_right = keys.d;
+            const move_forward = keys.w;
+            const move_backward = keys.s;
+            const look_up = false;
+            const look_down = false;
+            const look_left = false;
+            const look_right = false;
+            const jump = keys.space;
+
             const MOVE_SPEED = 0.1;
-            const JUMP_FORCE = 0.8;
+            const JUMP_FORCE = 0.3;
             var movement = vec3{};
             if (move_left) movement.x -= MOVE_SPEED;
             if (move_right) movement.x += MOVE_SPEED;
             if (move_forward) movement.z += MOVE_SPEED;
             if (move_backward) movement.z -= MOVE_SPEED;
+
             if (jump and world.translation.y == 0) movement.y -= JUMP_FORCE;
 
             var yaw: f64 = 0;
@@ -743,10 +710,10 @@ pub fn main() !void {
             world.look(pitch, yaw);
             world.move(movement);
         }
-        std.debug.print("pos {}, {}, {}\n", .{ world.translation.x, world.translation.y, world.translation.z });
-        std.debug.print("inertia {}, {}, {}\n", .{ world.inertia.x, world.inertia.y, world.inertia.z });
-        std.debug.print("pitch {}\n", .{world.pitch});
-        std.debug.print("yaw {}\n", .{world.yaw});
+        //std.debug.print("pos {}, {}, {}\n", .{ world.translation.x, world.translation.y, world.translation.z });
+        //std.debug.print("inertia {}, {}, {}\n", .{ world.inertia.x, world.inertia.y, world.inertia.z });
+        //std.debug.print("pitch {}\n", .{world.pitch});
+        //std.debug.print("yaw {}\n", .{world.yaw});
 
         const t_sleep_us = TARGET_PERIOD_US - t_loop;
         if (t_sleep_us > 0) {

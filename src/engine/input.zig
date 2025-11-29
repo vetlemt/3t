@@ -5,20 +5,100 @@ const posix = std.posix;
 const Thread = std.Thread;
 const Allocator = std.mem.Allocator;
 
+//const c = @cImport(@cInclude("device_events.h"));
 // Structure to hold shared state between threads
-pub const InputState = struct {
-    input: [1024]u8,
-    input_len: usize,
-    mutex: Thread.Mutex,
-    done: bool,
 
+const KeyType = enum {
+    W,
+    A,
+    S,
+    D,
+    SPACE,
+    ESC,
+};
+
+const KeyState = struct {
+    key: KeyType,
+    held: bool,
+    pub fn init(key_type: KeyType) KeyState {
+        return .{ .key = key_type, .held = false };
+    }
+};
+
+pub const InputKeys = struct {
+    w: bool = false,
+    a: bool = false,
+    s: bool = false,
+    d: bool = false,
+    space: bool = false,
+    esc: bool = false,
+};
+
+pub const InputState = struct {
+    input: [1024]u8 = undefined,
+    input_len: usize = 0,
+    mutex: Thread.Mutex,
+    done: bool = false,
+    keys: InputKeys,
     pub fn init() InputState {
-        return .{
-            .input = undefined,
-            .input_len = 0,
-            .mutex = Thread.Mutex{},
-            .done = false,
-        };
+        var s: InputState = undefined;
+        s.mutex = Thread.Mutex{};
+        return s;
+    }
+
+    pub fn pressed(self: *InputState, key: KeyType) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        switch (key) {
+            KeyType.W => {
+                self.keys.w = true;
+            },
+            KeyType.A => {
+                self.keys.a = true;
+            },
+            KeyType.S => {
+                self.keys.s = true;
+            },
+            KeyType.D => {
+                self.keys.d = true;
+            },
+            KeyType.SPACE => {
+                self.keys.space = true;
+            },
+            KeyType.ESC => {
+                self.keys.esc = true;
+            },
+        }
+    }
+
+    pub fn released(self: *InputState, key: KeyType) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        switch (key) {
+            KeyType.W => {
+                self.keys.w = false;
+            },
+            KeyType.A => {
+                self.keys.a = false;
+            },
+            KeyType.S => {
+                self.keys.s = false;
+            },
+            KeyType.D => {
+                self.keys.d = false;
+            },
+            KeyType.SPACE => {
+                self.keys.space = false;
+            },
+            KeyType.ESC => {
+                self.keys.esc = false;
+            },
+        }
+    }
+
+    pub fn key_change(self: *InputState, key: KeyType, value: i32) void {
+        if (value == 1) self.pressed(key);
+        if (value == 0) self.released(key);
     }
 
     pub fn append(self: *InputState, char: u8) void {
@@ -28,6 +108,12 @@ pub const InputState = struct {
             self.input[self.input_len] = char;
             self.input_len += 1;
         }
+    }
+
+    pub fn get_keys(self: *InputState) InputKeys {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.keys;
     }
 
     pub fn getInput(self: *InputState, allocator: Allocator) ![]u8 {
@@ -75,19 +161,67 @@ pub fn restoreTerminal(original: posix.termios) !void {
 
 // Thread function to read input
 pub fn readInput(state: *InputState) !void {
-    var stdin = std.fs.File.stdin().reader(&.{});
-    const reader = &stdin.interface;
+    //var mouse_dev = try std.fs.openFileAbsolute("/dev/input/event6", .{});
+    //defer mouse_dev.close();
+    //var mouse_reader = mouse_dev.reader(&.{});
 
-    var byte: [1]u8 = undefined;
+    var keyboard_dev = try std.fs.openFileAbsolute("/dev/input/event16", .{});
+    defer keyboard_dev.close();
+    var keyboard_reader = keyboard_dev.reader(&.{});
+
+    const Event = extern struct {
+        tv_sec: u64,
+        tv_usec: u64,
+        e_type: u16,
+        code: u16,
+        value: i32,
+    };
+    var e: Event = undefined;
+    var buffer: [24]u8 = undefined;
     while (!state.isDone()) {
-        reader.readSliceAll(&byte) catch |err| {
-            std.debug.print("Error reading input: {}\n", .{err});
-            return;
-        };
-        state.append(byte[0]);
-        if (byte[0] == 'q') { // Exit on 'q'
-            state.setDone();
-            break;
+        //try mouse_reader.interface.readSliceAll(&buffer);
+        //@memcpy(std.mem.asBytes(&e), &buffer);
+        //std.debug.print(" mouse: type {x}, code {x} value {x}\n", .{ e.e_type, e.code, e.value });
+
+        try keyboard_reader.interface.readSliceAll(&buffer);
+        //@memcpy(std.mem.asBytes(&e.tv_sec), &buffer[0..8]);
+
+        @memcpy(std.mem.asBytes(&e), &buffer);
+        std.debug.print(" keyboard: {}.{} type {}, code {} value {}\n", .{ e.tv_sec, e.tv_usec, e.e_type, e.code, e.value });
+
+        switch (e.code) {
+            1 => {
+                state.key_change(KeyType.ESC, e.value);
+                state.setDone();
+            },
+            17 => {
+                state.key_change(KeyType.W, e.value);
+            },
+            30 => {
+                state.key_change(KeyType.A, e.value);
+            },
+            31 => {
+                state.key_change(KeyType.S, e.value);
+            },
+            32 => {
+                state.key_change(KeyType.D, e.value);
+            },
+            57 => {
+                state.key_change(KeyType.SPACE, e.value);
+            },
+            else => {},
         }
+
+        //std.debug.print("{} {} {} {} {} {} {} {}, {} {} {} {} {} {} {} {}, {} {} {} {} {} {} {} {}\n", .{ buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7], buffer[8], buffer[9], buffer[10], buffer[11], buffer[12], buffer[13], buffer[14], buffer[15], buffer[16], buffer[17], buffer[18], buffer[19], buffer[20], buffer[21], buffer[22], buffer[23] });
+
+        //reader.readSliceAll(&byte) catch |err| {
+        //    std.debug.print("Error reading input: {}\n", .{err});
+        //    return;
+        //};
+        //state.append(byte[0]);
+        //if (byte[0] == 'q') { // Exit on 'q'
+        //    state.setDone();
+        //    break;
+        //}
     }
 }

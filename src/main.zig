@@ -19,6 +19,8 @@ const SCREEN_WIDTH: u32 = 128;
 const SCREEN_HEIGHT: u32 = 32;
 const SCREEN_DEFAULT_CHAR: u8 = ' ';
 
+const errororo = error{to_big};
+
 const Edge = struct {
     start: vec2z,
     end: vec2z,
@@ -29,11 +31,90 @@ const Edge = struct {
         self.atoms.deinit();
     }
 
-    fn init(start: vec2z, end: vec2z, allocator: std.mem.Allocator) !Edge {
+    fn x_crossing_point(start: vec2z, end: vec2z, c: i64) ?vec2z {
+        const cf: f64 = @floatFromInt(c);
+        const start_yf: f64 = @floatFromInt(start.y);
+        const start_xf: f64 = @floatFromInt(start.x);
+        const end_yf: f64 = @floatFromInt(end.y);
+        const end_xf: f64 = @floatFromInt(end.x);
+
+        if (start.y == end.y) return null;
+
+        const crosses: bool = ((start.y - c) * (end.y - c)) < 0;
+        if (!crosses) return null;
+
+        const slope: f64 = (cf - start_yf) / (end_yf - start_yf);
+        const intersects_line: bool = (slope >= 0) and (slope <= 1);
+
+        if (!intersects_line) return null;
+
+        const x_crossing = start_xf + (slope * (end_xf - start_xf));
+        const z_crossing = start.z + (slope * (end.z - start.z));
+        return .{ .x = @intFromFloat(x_crossing), .y = c, .z = z_crossing };
+    }
+
+    fn y_crossing_point(start: vec2z, end: vec2z, c: i64) ?vec2z {
+        const cf: f64 = @floatFromInt(c);
+        const start_xf: f64 = @floatFromInt(start.x);
+        const start_yf: f64 = @floatFromInt(start.y);
+        const end_xf: f64 = @floatFromInt(end.x);
+        const end_yf: f64 = @floatFromInt(end.y);
+
+        if (start.x == end.x) return null;
+
+        // Strict straddle test
+        const crosses: bool = ((start.x - c) * (end.x - c)) < 0;
+        if (!crosses) return null;
+
+        // Compute interpolation factor along x
+        const t: f64 = (cf - start_xf) / (end_xf - start_xf);
+        if (t < 0 or t > 1) return null;
+
+        // Interpolate y and z
+        const y_crossing_f: f64 = start_yf + t * (end_yf - start_yf);
+        const z_crossing: f64 = start.z + t * (end.z - start.z);
+
+        // x is exactly c (vertical line), convert y to integer
+        const y_crossing: i64 = @intFromFloat(y_crossing_f);
+
+        return .{ .x = c, .y = y_crossing, .z = z_crossing };
+    }
+
+    fn clip_point_to_bound(start: vec2z, point: *vec2z, axis: u8, bound_value: i64, crossing_fn: fn (vec2z, vec2z, i64) ?vec2z) void {
+        const coord = if (axis == 0) point.*.x else point.*.y;
+
+        if (coord < 0 or coord > bound_value) {
+            if (crossing_fn(start, point.*, bound_value)) |v| {
+                point.* = v;
+            }
+        }
+    }
+
+    fn clip_segment_to_bounds(start: *vec2z, end: *vec2z, x_max: i64, y_max: i64) ?void {
+        //if ((start.x < 0 and end.x < 0) or (start.x > x_max and end.x > x_max) or (start.y < 0 and end.y < 0) or (start.y > y_max and end.y > y_max)) {
+        //    return null;
+        //}
+        //
+        // Clip start point
+        clip_point_to_bound(end.*, start, 0, 0, y_crossing_point);
+        clip_point_to_bound(end.*, start, 0, x_max, y_crossing_point);
+        clip_point_to_bound(end.*, start, 1, 0, x_crossing_point);
+        clip_point_to_bound(end.*, start, 1, y_max, x_crossing_point);
+
+        // Clip end point
+        clip_point_to_bound(start.*, end, 0, 0, y_crossing_point);
+        clip_point_to_bound(start.*, end, 0, x_max, y_crossing_point);
+        clip_point_to_bound(start.*, end, 1, 0, x_crossing_point);
+        clip_point_to_bound(start.*, end, 1, y_max, x_crossing_point);
+    }
+
+    fn init(start: vec2z, end: vec2z, allocator: std.mem.Allocator) !?Edge {
         var edge: Edge = undefined;
         edge.start = start;
         edge.end = end;
         edge.atoms = std.array_list.Managed(vec2z).init(allocator);
+        //if (clip_segment_to_bounds(&edge.start, &edge.end, SCREEN_WIDTH, SCREEN_HEIGHT * 2) == null) return null;
+
         var x0: i64 = start.x;
         var y0: i64 = start.y;
         var x1: i64 = end.x;
@@ -61,11 +142,19 @@ const Edge = struct {
         var x: i64 = x0;
         var n: f64 = 0;
         while (x <= x1) : (x += 1) {
-            const px = if (steep) y else x;
-            const py = if (steep) x else y;
-            //if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
-            try edge.atoms.append(.{ .x = px, .y = py, .z = (depth_start + (depth_step * n)) + z_bias });
-            //}
+            var px = if (steep) y else x;
+            var py = if (steep) x else y;
+            if (px >= SCREEN_WIDTH) px = SCREEN_WIDTH;
+            if (px < 0) px = -1;
+
+            if (py >= SCREEN_HEIGHT * 2) py = SCREEN_HEIGHT * 2;
+            if (py < 0) py = -1;
+
+            const pz = (depth_start + (depth_step * n)) + z_bias;
+
+            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
+                try edge.atoms.append(.{ .x = px, .y = py, .z = pz });
+            }
             n += 1.0;
 
             err -= dy;
@@ -76,10 +165,6 @@ const Edge = struct {
         }
         // Force last atom to exact end depth (overrides FP drift)
         if (edge.atoms.items.len > 0) {
-            //const last_interpolated = edge.atoms.items[edge.atoms.items.len - 1].z;
-            //const depth_error = depth_end - last_interpolated;
-            //std.debug.print("edge end z projected {}, interpolated {}, error {}, step {}\n", .{ depth_end, last_interpolated, depth_error, depth_step });
-
             edge.atoms.items[edge.atoms.items.len - 1].z = depth_end + z_bias;
         }
         std.sort.heap(vec2z, edge.atoms.items, {}, struct {
@@ -94,9 +179,18 @@ const Edge = struct {
 
     fn intersects(self: *const Edge, y: i64) ?vec1z {
         if (self.start.y == self.end.y) return null;
+
         for (self.atoms.items) |atom| {
             if (atom.y == y) return .{ .x = atom.x, .z = atom.z };
         }
+
+        if (self.start.y == y) return .{ .x = self.start.x, .z = self.start.z };
+        if (self.end.y == y) return .{ .x = self.end.x, .z = self.end.z };
+
+        if (x_crossing_point(self.start, self.end, y)) |*crossing| {
+            return .{ .x = crossing.x, .z = crossing.z };
+        }
+
         return null;
     }
 };
@@ -136,6 +230,26 @@ const Screen = struct {
         const result: [SCREEN_HEIGHT * 2][SCREEN_WIDTH]Atom = .{default_row} ** (SCREEN_HEIGHT * 2);
         break :blk result;
     },
+
+    screen_buffer: [SCREEN_WIDTH * SCREEN_HEIGHT * 8]u8,
+    color_buffer: [32]u8,
+    stdout: std.fs.File.Writer,
+    writer: *std.Io.Writer,
+
+    fn init() !Screen {
+        var screen: Screen = undefined;
+
+        try format_ansi_color(&screen.color_buffer, AtomColor.WHITE, AtomColor.NONE);
+        screen.stdout = std.fs.File.stdout().writer(&screen.screen_buffer); // bufferedgit git .writer();
+        screen.writer = &screen.stdout.interface;
+
+        try screen.init_terminal();
+        return screen;
+    }
+
+    fn deinit(self: *Screen) !void {
+        try self.deinit_terminal();
+    }
 
     fn clear(self: *Screen) void {
         for (0..SCREEN_HEIGHT) |i| {
@@ -220,22 +334,17 @@ const Screen = struct {
     }
 
     fn print(self: *Screen) !void {
-        var screen_buffer: [SCREEN_WIDTH * SCREEN_HEIGHT * 8]u8 = undefined;
-        var color_buffer: [32]u8 = undefined;
-        try format_ansi_color(&color_buffer, AtomColor.WHITE, AtomColor.NONE);
-        //std.debug.print(color.CLEAR.*, .{});
+        try format_ansi_color(&self.color_buffer, AtomColor.WHITE, AtomColor.NONE);
         self.render_sub_pixels();
-        var stdout = std.fs.File.stdout().writer(&screen_buffer); // bufferedgit git .writer();
-        const writer = &stdout.interface;
 
         // Clear and home cursor each time (but stay in alt screen)
-        try writer.print("\x1B[2J\x1B[1;1H{s}", .{color_buffer});
+        try self.writer.print("\x1B[2J\x1B[1;1H{s}", .{self.color_buffer});
 
-        try writer.print("┌", .{});
+        _ = try self.writer.write("┌");
         for (0..SCREEN_WIDTH) |_| {
-            try writer.print("─", .{});
+            _ = try self.writer.write("─");
         }
-        try writer.print("┐\n", .{});
+        _ = try self.writer.write("┐\n");
 
         var previous_fg: AtomColor = AtomColor.NONE;
         var previous_bg: AtomColor = AtomColor.NONE;
@@ -243,29 +352,29 @@ const Screen = struct {
         var fg_has_changed: bool = true;
 
         for (self.chars, 0..self.chars.len) |row, i| {
-            try format_ansi_color(&color_buffer, AtomColor.WHITE, AtomColor.NONE);
-            try writer.print("{s}│", .{color_buffer});
+            try format_ansi_color(&self.color_buffer, AtomColor.WHITE, AtomColor.NONE);
+            try self.writer.print("{s}│", .{self.color_buffer});
             for (row) |c| {
                 bg_has_changed = c.bg != previous_bg;
                 fg_has_changed = c.fg != previous_fg;
                 if (fg_has_changed or bg_has_changed) {
-                    try format_ansi_color(&color_buffer, c.fg, c.bg);
-                    try writer.print("{s}{s}", .{ color_buffer, c.data.* });
+                    try format_ansi_color(&self.color_buffer, c.fg, c.bg);
+                    try self.writer.print("{s}{s}", .{ self.color_buffer, c.data.* });
                 } else {
-                    try writer.print("{s}", .{c.data.*});
+                    try self.writer.print("{s}", .{c.data.*});
                 }
                 previous_bg = c.bg;
                 previous_fg = c.fg;
             }
-            try format_ansi_color(&color_buffer, AtomColor.WHITE, AtomColor.NONE);
-            try writer.print("{s}│{d}\n", .{ color_buffer, i });
+            try format_ansi_color(&self.color_buffer, AtomColor.WHITE, AtomColor.NONE);
+            try self.writer.print("{s}│{d}\n", .{ self.color_buffer, i });
         }
-        try writer.print("└", .{});
+        _ = try self.writer.write("└");
         for (0..SCREEN_WIDTH) |_| {
-            try writer.print("─", .{});
+            _ = try self.writer.write("─");
         }
-        try writer.print("┘{s}\n", .{ansi.RESET.*});
-        try writer.flush();
+        try self.writer.print("┘{s}\n", .{ansi.RESET.*});
+        try self.writer.flush();
     }
 
     fn fill_x(self: *Screen, start: vec2z, end: vec1z, color: AtomColor) void {
@@ -283,13 +392,11 @@ const Screen = struct {
             const atom_depth = curr_depth + (d_depth * @as(f64, @floatFromInt(offset)));
             offset += 1;
 
-            var fill_atom = false;
-            if (atom_depth < self.atoms[vy][x].z) { // Smaller depth = closer, overwrite
-                fill_atom = true;
-            }
+            const atom: *Atom = &self.atoms[vy][x];
+            const fill_atom = (atom_depth < atom.z and atom_depth > 0);
             if (fill_atom) {
-                self.atoms[vy][x].color = color;
-                self.atoms[vy][x].z = atom_depth;
+                atom.color = color;
+                atom.z = atom_depth;
             }
         }
     }
@@ -299,15 +406,31 @@ const Screen = struct {
             if ((item.x < SCREEN_WIDTH) and (item.x >= 0) and (item.y < SCREEN_HEIGHT * 2) and (item.y >= 0)) {
                 const xx: usize = @intCast(item.x);
                 const yy: usize = @intCast(item.y);
-                if (item.z <= self.atoms[yy][xx].z) {
+                if (item.z <= self.atoms[yy][xx].z and item.z > 0) {
                     self.atoms[yy][xx] = .{ .color = fill, .z = item.z };
                 }
             }
         }
     }
 
+    fn is_within_screen(vert: *vec2z) bool {
+        return ((vert.x >= 0 and vert.x < SCREEN_WIDTH) and (vert.y >= 0 and vert.y < SCREEN_HEIGHT * 2));
+    }
+
     fn draw_surface(self: *Screen, vertecies: []vec2z, color: AtomColor) !void {
         //std.debug.print("<-- drawing surface -->\n", .{});
+
+        var part_of_surface_is_not_behind_camera: bool = false;
+        for (vertecies) |*vert| {
+            part_of_surface_is_not_behind_camera |= (vert.z > 0.000);
+        }
+        if (!part_of_surface_is_not_behind_camera) return;
+
+        var part_of_surface_is_on_screen: bool = false;
+        for (vertecies) |*vert| {
+            part_of_surface_is_on_screen |= is_within_screen(vert);
+        }
+        //if (!part_of_surface_is_on_screen) return;
 
         var average_depth: f64 = 0;
         for (0..vertecies.len) |i| {
@@ -320,13 +443,11 @@ const Screen = struct {
         defer edges.deinit(allocator);
 
         for (1..vertecies.len) |i| {
-            //std.debug.print("<-- drawing surface edge -->\n", .{});
             const e = try Edge.init(vertecies[i - 1], vertecies[i], allocator);
-            try edges.append(allocator, e);
+            if (e != null) try edges.append(allocator, e.?);
         }
-        //std.debug.print("<-- drawing surface edge -->\n", .{});
         const e = try Edge.init(vertecies[vertecies.len - 1], vertecies[0], allocator);
-        try edges.append(allocator, e);
+        if (e != null) try edges.append(allocator, e.?);
 
         var max_y: i64 = std.math.minInt(i64);
         var min_y: i64 = std.math.maxInt(i64);
@@ -370,9 +491,6 @@ const Screen = struct {
             }
 
             if (intersections.items.len < 2) continue;
-            if (intersections.items.len % 2 == 1) {
-                try intersections.append(intersections.items[intersections.items.len - 2]);
-            }
 
             std.sort.heap(vec1z, intersections.items, {}, struct {
                 pub fn lessThan(_: void, a: vec1z, b: vec1z) bool {
@@ -398,6 +516,18 @@ const Screen = struct {
     }
 
     fn draw_lines(self: *Screen, vertecies: []vec2z, color: AtomColor) !void {
+        var part_of_surface_is_not_behind_camera: bool = false;
+        for (vertecies) |*vert| {
+            part_of_surface_is_not_behind_camera |= (vert.z > 0.000);
+        }
+        if (!part_of_surface_is_not_behind_camera) return;
+
+        var part_of_surface_is_on_screen: bool = false;
+        for (vertecies) |*vert| {
+            part_of_surface_is_on_screen |= is_within_screen(vert);
+        }
+        if (!part_of_surface_is_on_screen) return;
+
         var average_depth: f64 = 0;
         for (0..vertecies.len) |i| {
             average_depth += vertecies[i].z;
@@ -406,16 +536,13 @@ const Screen = struct {
 
         const allocator = std.heap.page_allocator;
         var edges = std.ArrayList(Edge).empty;
-        defer edges.deinit(allocator);
 
         for (1..vertecies.len) |i| {
-            //std.debug.print("<-- drawing surface edge -->\n", .{});
             const e = try Edge.init(vertecies[i - 1], vertecies[i], allocator);
-            try edges.append(allocator, e);
+            if (e != null) try edges.append(allocator, e.?);
         }
-        //std.debug.print("<-- drawing surface edge -->\n", .{});
         const e = try Edge.init(vertecies[vertecies.len - 1], vertecies[0], allocator);
-        try edges.append(allocator, e);
+        if (e != null) try edges.append(allocator, e.?);
 
         // free edges
         for (edges.items) |*edge| {
@@ -425,20 +552,14 @@ const Screen = struct {
         //self.emplace(vertecies, AtomColor.GREEN);
     }
 
-    fn init_terminal() !void {
-        const stdout = std.fs.File.stdout();
-        // Enter alternate screen and hide cursor
-        _ = try stdout.write("\x1B[?1049h\x1B[?25l");
-        // Optional: Initial clear and home
-        _ = try stdout.write("\x1B[2J\x1B[1;1H");
+    fn init_terminal(self: *Screen) !void {
+        _ = try self.writer.write("\x1B[?1049h\x1B[?25l");
+        _ = try self.writer.write("\x1B[2J\x1B[1;1H");
     }
 
-    fn deinit_terminal() !void {
-        const stdout = std.fs.File.stdout();
-        // Exit alternate screen, show cursor, reset colors
-        _ = try stdout.write("\x1B[?1049l\x1B[?25h\x1B[0m");
-        // Optional: Final clear if needed
-        _ = try stdout.write("\x1B[2J\x1B[1;1H");
+    fn deinit_terminal(self: *Screen) !void {
+        _ = try self.writer.write("\x1B[?1049l\x1B[?25h\x1B[0m");
+        _ = try self.writer.write("\x1B[2J\x1B[1;1H");
     }
 };
 
@@ -470,20 +591,6 @@ pub const Floor = struct {
             }
         }
         return floor;
-
-        //return .{
-        //    .faces = [_]Polygon{
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x + tile_size, .y = offset.y, .z = offset.z - tile_size }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x + tile_size, .y = offset.y, .z = offset.z }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x + tile_size, .y = offset.y, .z = offset.z + tile_size }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x, .y = offset.y, .z = offset.z - tile_size }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x, .y = offset.y, .z = offset.z }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x, .y = offset.y, .z = offset.z + tile_size }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x - tile_size, .y = offset.y, .z = offset.z - tile_size }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x - tile_size, .y = offset.y, .z = offset.z }, q),
-        //        Polygon.init(tile, AtomColor.WHITE, .{ .x = offset.x - tile_size, .y = offset.y, .z = offset.z + tile_size }, q),
-        //    },
-        //};
     }
 };
 
@@ -614,9 +721,8 @@ const TARGET_FRAME_RATE: i64 = 60;
 const TARGET_PERIOD_US: i64 = @truncate(1_000_000 / TARGET_FRAME_RATE);
 
 pub fn main() !void {
-    var screen = Screen{};
-    try Screen.init_terminal();
-    defer Screen.deinit_terminal() catch |err| {
+    var screen = try Screen.init();
+    defer screen.deinit() catch |err| {
         std.debug.print("Failed to restore terminal: {}\n", .{err});
     };
 
@@ -626,12 +732,6 @@ pub fn main() !void {
     // Initialize shared state
     var state = inputs.InputState.init();
 
-    // Enable raw mode
-    //const original_term = try inputs.enableRawMode();
-    //defer inputs.restoreTerminal(original_term) catch |err| {
-    //    std.debug.print("Failed to restore terminal: {}\n", .{err});
-    //};
-
     // Spawn input reading thread
     const kbd_thread = try std.Thread.spawn(.{}, inputs.read_keyboard_input_thread, .{&state});
     defer kbd_thread.join();
@@ -639,7 +739,7 @@ pub fn main() !void {
     defer mouse_thread.join();
 
     std.debug.print("Exiting...\n", .{});
-    const floor = try Floor.init(2, 5, 5, .{ .x = -5, .y = 1, .z = 0 }, allocator);
+    const floor = try Floor.init(2, 1, 1, .{ .x = -5, .y = 1, .z = 0 }, allocator);
     var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 3 }, allocator);
 
     var itteration: u64 = 0;
@@ -648,7 +748,12 @@ pub fn main() !void {
         world.tick();
         const Verts = struct { verts: std.ArrayList(vec2z), z: f64, color: AtomColor };
         var vert_order = std.ArrayList(Verts).empty;
-        defer vert_order.deinit(allocator);
+        defer {
+            for (vert_order.items) |*verts| {
+                verts.verts.deinit(allocator);
+            }
+            vert_order.deinit(allocator);
+        }
         for (floor.faces.items) |*poly| {
             const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
             var z: f64 = 0;
@@ -682,14 +787,16 @@ pub fn main() !void {
             try screen.draw_surface(v.verts.items, v.color);
         }
         //for (vert_order.items) |*v| {
-        //    try screen.draw_lines(v.verts.items, AtomColor.BLACK);
+        //    try screen.draw_lines(v.verts.items, AtomColor.WHITE);
         //}
+        const t_draw = std.time.microTimestamp() - t;
 
         try screen.print();
         screen.clear();
         const t_loop = std.time.microTimestamp() - t;
-        //std.debug.print("render time µs {}\n", .{t_loop});
-        //std.debug.print("itteration {}\n", .{itteration});
+        std.debug.print("draw time µs {}\n", .{t_draw});
+        std.debug.print("render time µs {}\n", .{t_loop});
+
         {
             const keys = state.get_keys();
 
@@ -700,37 +807,48 @@ pub fn main() !void {
 
             const jump = keys.space;
 
-            const MOVE_SPEED = 0.1;
+            const MOVE_FORCE = 0.1;
             const JUMP_FORCE = 0.3;
             var movement = vec3{};
 
-            if (move_left) movement.x -= MOVE_SPEED;
-            if (move_right) movement.x += MOVE_SPEED;
-            if (move_forward) movement.z += MOVE_SPEED;
-            if (move_backward) movement.z -= MOVE_SPEED;
+            if (move_left) movement.x -= MOVE_FORCE;
+            if (move_right) movement.x += MOVE_FORCE;
+            if (move_forward) movement.z += MOVE_FORCE;
+            if (move_backward) movement.z -= MOVE_FORCE;
 
-            const root2 = std.math.sqrt(2);
             if ((move_forward ^ move_backward) & (move_left ^ move_right)) {
-                movement.x *= root2;
-                movement.z *= root2;
+                const r2 = 1.0 / std.math.sqrt(2);
+                movement.x *= r2;
+                movement.z *= r2;
             }
 
             if (jump and world.translation.y == 0) movement.y -= JUMP_FORCE;
 
             const mouse_movement = state.get_mouse_movement();
-            const LOOK_SPEED = 0.002;
+            const LOOK_SPEED = 0.001;
             const yaw: f64 = LOOK_SPEED * mouse_movement.x;
             const pitch: f64 = LOOK_SPEED * -mouse_movement.y;
             world.look(pitch, yaw);
             world.move(movement);
         }
 
-        //std.debug.print("pos {}, {}, {}\n", .{ world.translation.x, world.translation.y, world.translation.z });
-        //std.debug.print("inertia {}, {}, {}\n", .{ world.inertia.x, world.inertia.y, world.inertia.z });
-        //std.debug.print("pitch {}\n", .{world.pitch});
-        //std.debug.print("yaw {}\n", .{world.yaw});
+        std.debug.print("pos {}, {}, {}\n", .{ world.translation.x, world.translation.y, world.translation.z });
+        std.debug.print("inertia {}, {}, {}\n", .{ world.inertia.x, world.inertia.y, world.inertia.z });
+        std.debug.print("pitch {}\n", .{world.pitch});
+        std.debug.print("yaw {}\n", .{world.yaw});
+        std.debug.print("itteration {}\n", .{itteration});
+        const t_frame = std.time.microTimestamp() - t;
+        std.debug.print("itteration time {}\n", .{t_frame});
 
-        const t_sleep_us = TARGET_PERIOD_US - t_loop;
+        //for (&cube.faces) |*poly| {
+        //    const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
+        //    for (verts.items) |*vert| {
+        //        std.debug.print("({},{},{})\n", .{ vert.x, vert.y, vert.z });
+        //    }
+        //}
+        if (t_loop > 20_000) return;
+
+        const t_sleep_us = TARGET_PERIOD_US - t_frame;
         if (t_sleep_us > 0) {
             const t_sleep_ns: u64 = @as(u64, @intCast(t_sleep_us)) * 1000;
             std.Thread.sleep(t_sleep_ns);

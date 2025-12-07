@@ -184,7 +184,7 @@ pub fn restoreTerminal(original: posix.termios) !void {
 
 // Thread function to read input
 pub fn read_keyboard_input_thread(state: *InputState) !void {
-    var keyboard_dev = try std.fs.openFileAbsolute("/dev/input/event16", .{});
+    var keyboard_dev = try std.fs.openFileAbsolute("/dev/input/event15", .{});
     defer keyboard_dev.close();
     var keyboard_reader = keyboard_dev.reader(&.{});
 
@@ -229,7 +229,7 @@ pub fn read_keyboard_input_thread(state: *InputState) !void {
 
 // Thread function to read input
 pub fn read_mouse_input_thread(state: *InputState) !void {
-    var mouse_dev = try std.fs.openFileAbsolute("/dev/input/event6", .{});
+    var mouse_dev = try std.fs.openFileAbsolute("/dev/input/event5", .{});
     defer mouse_dev.close();
     var mouse_reader = mouse_dev.reader(&.{});
 

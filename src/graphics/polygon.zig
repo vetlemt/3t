@@ -70,10 +70,7 @@ pub const Polygon = struct {
     pub fn transform(self: *Polygon, time: f64) void {
         const w: f64 = time * std.math.pi / 5000.0;
         for (self.vertices.items) |*v| {
-            const r = self.q.rotate_point(v.*, w);
-            v.x = r.x;
-            v.y = r.y;
-            v.z = r.z;
+            v.* = self.q.rotate_point(v.*, w);
         }
     }
 };

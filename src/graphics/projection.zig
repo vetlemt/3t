@@ -16,14 +16,15 @@ pub fn project_point(a: vec3, e: vec3, t: vec3, cc: vec3) vec3 {
 
     const dx = c.y * ((s.z * y) + (c.z * x)) - (s.y * z);
     const dy = s.x * ((c.y * z) + s.y * ((s.z * y) + (c.z * x))) + c.x * ((c.z * y) - (s.z * x));
-    const dz = c.x * ((c.y * z) + s.y * ((s.z * y) + (c.z * x))) - s.x * ((c.z * y) - (s.z * x));
-    if (dz > 0.1) {
-        const bx = (e.z / dz) * dx + e.x;
-        const by = (e.z / dz) * dy + e.y;
-        return .{ .x = bx, .y = by, .z = dz };
-    } else {
-        const bx = if (dx > 0) 2 * e.x + 1 else -1;
-        const by = if (dy > 0) 2 * e.y + 1 else -1;
-        return .{ .x = bx, .y = by, .z = dz };
+    var dz = c.x * ((c.y * z) + s.y * ((s.z * y) + (c.z * x))) - s.x * ((c.z * y) - (s.z * x));
+    if (dz == 0) dz = 0.1;
+    if (@abs(dz) < 0.1) {
+        if (dz > 0) dz = 0.1;
+        if (dz < 0) dz = -0.1;
     }
+    const bx = (e.z / dz) * dx + e.x;
+    const by = (e.z / dz) * dy + e.y;
+    if (dz < 0) {
+        return .{ .x = -bx, .y = -by, .z = dz };
+    } else return .{ .x = bx, .y = by, .z = dz };
 }

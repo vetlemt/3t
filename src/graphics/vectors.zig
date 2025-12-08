@@ -32,4 +32,42 @@ pub const vec1z = struct {
     }
 };
 
-pub const vec3 = struct { x: f64 = 0, y: f64 = 0, z: f64 = 0 };
+pub const vec3 = struct {
+    x: f64 = 0,
+    y: f64 = 0,
+    z: f64 = 0,
+
+    pub fn add(a: vec3, b: vec3) vec3 {
+        return .{ .x = a.x + b.x, .y = a.y + b.y, .z = a.z + b.z };
+    }
+
+    pub fn subtract(a: vec3, b: vec3) vec3 {
+        return .{ .x = a.x - b.x, .y = a.y - b.y, .z = a.z - b.z };
+    }
+
+    pub fn dot(a: vec3, b: vec3) f64 {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    pub fn cross(a: vec3, b: vec3) vec3 {
+        return .{
+            .x = a.y * b.z - a.z * b.y,
+            .y = a.z * b.x - a.x * b.z,
+            .z = a.x * b.y - a.y * b.x,
+        };
+    }
+
+    pub fn length(v: vec3) f64 {
+        return @sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    }
+
+    pub fn normalize(v: vec3) vec3 {
+        const len = vec3.length(v);
+        if (len == 0) return v; // avoid divide-by-zero
+        return .{
+            .x = v.x / len,
+            .y = v.y / len,
+            .z = v.z / len,
+        };
+    }
+};

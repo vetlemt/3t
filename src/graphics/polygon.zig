@@ -24,20 +24,25 @@ pub const AtomColor = enum {
 
 pub const Polygon = struct {
     color: AtomColor,
-    vertices: std.ArrayList(vec3),
+    vertices: []vec3,
     offset: vec3,
     center: vec3,
     q: Quaternion,
 
-    pub fn init(vertices: std.ArrayList(vec3), color: AtomColor, offset: vec3, q: Quaternion) Polygon {
+    pub fn init(vertices: []vec3, color: AtomColor, offset: vec3, q: Quaternion, allocator: std.mem.Allocator) !Polygon {
         var polygon: Polygon = undefined;
-        polygon.vertices = vertices;
+
+        polygon.vertices = try allocator.alloc(vec3, vertices.len);
+        polygon.vertices.len = vertices.len;
+        std.mem.copyBackwards(vec3, polygon.vertices, vertices);
+
+        std.debug.print("p v init copy ok\n", .{});
         polygon.color = color;
         polygon.offset = offset;
         polygon.q = q;
         polygon.center = .{ .x = 0, .y = 0, .z = 0 };
-        const n_vert = vertices.items.len;
-        for (vertices.items) |*v| {
+        const n_vert = polygon.vertices.len;
+        for (polygon.vertices) |*v| {
             polygon.center.x += v.x;
             polygon.center.y += v.y;
             polygon.center.z += v.z;
@@ -46,6 +51,10 @@ pub const Polygon = struct {
         polygon.center.y /= @floatFromInt(n_vert);
         polygon.center.z /= @floatFromInt(n_vert);
         return polygon;
+    }
+
+    pub fn deinit(self: *Polygon, allocator: std.mem.Allocator) void {
+        try self.vertices.deinit(allocator);
     }
 
     fn clip_to_plane(input: []const vec3, a: f64, b: f64, c: f64, d: f64, allocator: std.mem.Allocator) !std.array_list.Managed(vec3) {
@@ -127,7 +136,7 @@ pub const Polygon = struct {
         const e = vec3{ .x = 64, .y = 32, .z = ez };
         const t = vec3{ .x = pitch, .y = yaw, .z = 0 };
 
-        for (self.vertices.items) |v| {
+        for (self.vertices) |v| {
             const a = vec3{ .x = v.x + self.offset.x, .y = v.y + self.offset.y, .z = v.z + self.offset.z };
             const p = projecting.view_space_projection(a, t, translation);
             // std.debug.print("vs ({},{},{})\n", .{ p.x, p.y, p.z });
@@ -175,7 +184,7 @@ pub const Polygon = struct {
 
     pub fn transform(self: *Polygon, time: f64) void {
         const w: f64 = time * std.math.pi / 5000.0;
-        for (self.vertices.items) |*v| {
+        for (self.vertices) |*v| {
             v.* = self.q.rotate_point(v.*, w);
         }
     }

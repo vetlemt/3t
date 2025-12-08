@@ -73,6 +73,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const objects_module = b.addModule("objects", .{
+        .root_source_file = b.path("src/engine/objects.zig"),
+        .imports = &.{
+            .{ .name = "vectors", .module = vectors_module },
+            .{ .name = "polygon", .module = polygon_module },
+        },
+        .target = target,
+    });
+
     // Define the _3t module (assuming mod is defined elsewhere, e.g., for the package itself)
     const mod = b.addModule("_3t", .{
         .root_source_file = b.path("src/root.zig"),
@@ -95,6 +104,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "quaternions", .module = quaternions_module },
                 .{ .name = "projection", .module = projection_module },
                 .{ .name = "input", .module = input_module },
+                .{ .name = "objects", .module = objects_module },
             },
         }),
     });

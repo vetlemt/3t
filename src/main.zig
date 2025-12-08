@@ -4,6 +4,7 @@ const _3t = @import("_3t");
 const ansi = @import("ansi");
 const char = @import("chars");
 const inputs = @import("input");
+const objects = @import("objects");
 const polygon = @import("polygon");
 const Polygon = polygon.Polygon;
 const AtomColor = polygon.AtomColor;
@@ -599,7 +600,7 @@ pub const Cube = struct {
     faces: [6]Polygon,
 
     pub fn init(side: f64, offset: vec3, allocator: std.mem.Allocator) !Cube {
-        const q = quaternion.Quaternion.init(0, 1, 1, 1); // Identity start
+        const q = quaternion.Quaternion.init(0, 1, 1, 1);
         const h = side / 2.0; // Half-side for centering at origin
         const verts = [_]vec3{
             .{ .x = -h, .y = -h, .z = -h }, // 0: back-bottom-left
@@ -639,12 +640,12 @@ pub const Cube = struct {
 
         return .{
             .faces = [_]Polygon{
-                Polygon.init(back_verts, AtomColor.RED, offset, q),
-                Polygon.init(front_verts, AtomColor.GREEN, offset, q),
-                Polygon.init(left_verts, AtomColor.BLUE, offset, q),
-                Polygon.init(right_verts, AtomColor.YELLOW, offset, q),
-                Polygon.init(bottom_verts, AtomColor.PURPLE, offset, q),
-                Polygon.init(top_verts, AtomColor.CYAN, offset, q),
+                Polygon.init(try back_verts.toOwnedSlice(allocator), AtomColor.RED, offset, q),
+                Polygon.init(try front_verts.toOwnedSlice(allocator), AtomColor.GREEN, offset, q),
+                Polygon.init(try left_verts.toOwnedSlice(allocator), AtomColor.BLUE, offset, q),
+                Polygon.init(try right_verts.toOwnedSlice(allocator), AtomColor.YELLOW, offset, q),
+                Polygon.init(try bottom_verts.toOwnedSlice(allocator), AtomColor.PURPLE, offset, q),
+                Polygon.init(try top_verts.toOwnedSlice(allocator), AtomColor.CYAN, offset, q),
             },
         };
     }
@@ -717,6 +718,25 @@ const World = struct {
         self.pitch_inertia += pitch;
     }
 };
+const Verts = struct { verts: std.ArrayList(vec2z), z: f64, color: AtomColor };
+
+fn project_polygon_to_screen(polys: []*Polygon, world: *World, vert_order: *std.ArrayList(Verts), m: *std.Thread.Mutex, allocator: std.mem.Allocator) void {
+    for (polys) |*poly| {
+        const verts = poly.*.*.projection(world.translation, world.pitch, world.yaw, allocator) catch {
+            return;
+        };
+        var z: f64 = 0;
+        for (verts.items) |*v| {
+            z += v.z;
+        }
+        z /= @floatFromInt(verts.items.len);
+        m.lock();
+        defer m.unlock();
+        vert_order.append(allocator, .{ .verts = verts, .z = z, .color = poly.*.color }) catch {
+            return;
+        };
+    }
+}
 
 const TARGET_FRAME_RATE: i64 = 60;
 const TARGET_PERIOD_US: i64 = @truncate(1_000_000 / TARGET_FRAME_RATE);
@@ -740,14 +760,65 @@ pub fn main() !void {
     defer mouse_thread.join();
 
     std.debug.print("Exiting...\n", .{});
-    const floor = try Floor.init(2, 5, 5, .{ .x = -5, .y = 1, .z = 0 }, allocator);
-    var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 3 }, allocator);
+    //const floor = try Floor.init(2, 5, 5, .{ .x = -5, .y = 1, .z = 0 }, allocator);
+    //_ = floor; // autofix
+    //var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 15 }, allocator);
+    //_ = cube; // autofix
+
+    const d = objects.importModel("./beveled_cube.obj");
+    var imported_model = std.ArrayList(Polygon).empty;
+    try imported_model.ensureTotalCapacity(allocator, d.polygons.len);
+    defer imported_model.deinit(allocator);
+
+    const colors: [6]AtomColor = .{ AtomColor.RED, AtomColor.GREEN, AtomColor.BLUE, AtomColor.YELLOW, AtomColor.PURPLE, AtomColor.CYAN };
+    _ = colors; // autofix
+
+    var j: usize = 0;
+    for (d.polygons) |*p| {
+        const indexes = d.indices[p.start .. p.start + p.count];
+        var verts = std.ArrayList(vec3).empty;
+        try verts.ensureTotalCapacity(allocator, p.count);
+
+        std.debug.print("--poly--\n", .{});
+        for (indexes) |i| {
+            std.debug.print("-i {} v ({}, {}, {})\n", .{ i.v, d.verts[i.v].x, d.verts[i.v].y, d.verts[i.v].z });
+            // std.debug.print("-n {} v ({}, {}, {})\n", .{ i.n, d.verts[i.n].x, d.verts[i.n].y, d.verts[i.n].z });
+            try verts.append(allocator, d.verts[i.v]);
+        }
+        const vert_slice = try verts.toOwnedSlice(allocator);
+        verts.deinit(allocator);
+        const poly = try Polygon.init(vert_slice, AtomColor.RED, .{ .x = 0, .y = 0, .z = 10 }, .{ .a = 0, .b = 1, .c = 1, .d = 1 }, allocator);
+        std.debug.print("poly  created!\n", .{});
+        try imported_model.append(allocator, poly);
+        std.debug.print("poly  appended!\n", .{});
+        j += 1;
+    }
+
+    std.debug.print("verts {}\n", .{d.verts.len});
+    std.debug.print("indexes {}\n", .{d.indices.len});
+    std.debug.print("polys {}\n", .{d.polygons.len});
+    std.debug.print("imported polys {}\n", .{imported_model.items.len});
+
+    //for (imported_model.items) |*poly| {
+    //    std.debug.print("-poly-- size {}\n", .{poly.vertices.len});
+    //}
+
+    //std.debug.assert(false);
+
+    const n_threads = try std.Thread.getCpuCount();
+    var pool: std.Thread.Pool = undefined;
+    try pool.init(.{ .allocator = allocator, .n_jobs = n_threads });
+    defer pool.deinit();
+    var polygon_mutex: std.Thread.Mutex = undefined;
+
+    var wg: std.Thread.WaitGroup = .{};
+
+    var smooth_time: f64 = 0;
 
     var itteration: u64 = 0;
     while (!state.isDone()) {
         const t = std.time.microTimestamp();
         world.tick();
-        const Verts = struct { verts: std.ArrayList(vec2z), z: f64, color: AtomColor };
         var vert_order = std.ArrayList(Verts).empty;
         defer {
             for (vert_order.items) |*verts| {
@@ -755,34 +826,48 @@ pub fn main() !void {
             }
             vert_order.deinit(allocator);
         }
-        for (floor.faces.items) |*poly| {
-            const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
-            var z: f64 = 0;
-            for (verts.items) |*v| {
-                z += v.z;
+
+        var polys = std.ArrayList(*Polygon).empty;
+        defer polys.deinit(allocator);
+
+        for (imported_model.items) |*poly| {
+            poly.transform(60);
+            try polys.append(allocator, poly);
+        }
+        // for (floor.faces.items) |*poly| {
+        //     try polys.append(allocator, poly);
+        // }
+        //for (&cube.faces) |*poly| {
+        //    //poly.transform(60);
+        //    try polys.append(allocator, poly);
+        //}
+
+        const N_POLYS_PER_THREAD = 16;
+        var n_dispatched: usize = 0;
+        while (n_dispatched < polys.items.len) {
+            var start: usize = 0;
+            var end: usize = 0;
+            const left = polys.items.len - n_dispatched;
+            if (left > N_POLYS_PER_THREAD) {
+                start = n_dispatched;
+                end = n_dispatched + left;
+            } else {
+                start = n_dispatched;
+                end = polys.items.len;
             }
-            z /= @floatFromInt(verts.items.len);
-            try vert_order.append(allocator, .{ .verts = verts, .z = z, .color = poly.color });
+            n_dispatched += (end - start);
+            const polys_slice = polys.items[start..end];
+            pool.spawnWg(&wg, project_polygon_to_screen, .{ polys_slice, &world, &vert_order, &polygon_mutex, allocator });
         }
 
-        for (&cube.faces) |*poly| {
-            poly.*.transform(60); //30
-            const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
-            var z: f64 = 0;
-            for (verts.items) |*v| {
-                z += v.z;
-            }
-            z /= @floatFromInt(verts.items.len);
-            if (z > 0) {
-                try vert_order.append(allocator, .{ .verts = verts, .z = z, .color = poly.color });
-            }
-        }
-
-        std.sort.heap(Verts, vert_order.items, {}, struct {
-            pub fn lessThan(_: void, a: Verts, b: Verts) bool {
-                return a.z < b.z;
-            }
-        }.lessThan);
+        pool.waitAndWork(&wg);
+        //std.sort.heap(Verts, vert_order.items, {}, struct {
+        //    pub fn lessThan(_: void, a: Verts, b: Verts) bool {
+        //        return a.z < b.z;
+        //    }
+        //}.lessThan);
+        //
+        const t_proj = std.time.microTimestamp() - t;
 
         for (vert_order.items) |*v| {
             try screen.draw_surface(v.verts.items, v.color);
@@ -790,13 +875,20 @@ pub fn main() !void {
         //for (vert_order.items) |*v| {
         //    try screen.draw_lines(v.verts.items, AtomColor.BLACK);
         //}
-        const t_draw = std.time.microTimestamp() - t;
+        const t_draw = std.time.microTimestamp() - t - t_proj;
 
         try screen.print();
         screen.clear();
         const t_loop = std.time.microTimestamp() - t;
+
+        std.debug.print("proj time µs {}\n", .{t_proj});
         std.debug.print("draw time µs {}\n", .{t_draw});
         std.debug.print("render time µs {}\n", .{t_loop});
+        if (smooth_time == 0) {
+            smooth_time = @as(f64, @floatFromInt(t_loop));
+        } else smooth_time = (smooth_time * 0.99) + (0.01 * @as(f64, @floatFromInt(t_loop)));
+        std.debug.print("render time µs smooth {d:.0}\n", .{smooth_time});
+        std.debug.print("n_threads {}\n", .{n_threads});
 
         {
             const keys = state.get_keys();

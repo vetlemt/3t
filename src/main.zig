@@ -152,7 +152,7 @@ const Edge = struct {
 
             const pz = (depth_start + (depth_step * n)) + z_bias;
 
-            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2) {
+            if (px >= 0 and px < SCREEN_WIDTH and py >= 0 and py < SCREEN_HEIGHT * 2 and pz > 0) {
                 try edge.atoms.append(.{ .x = px, .y = py, .z = pz });
             }
             n += 1.0;
@@ -491,6 +491,7 @@ const Screen = struct {
             }
 
             if (intersections.items.len < 2) continue;
+            //if (intersections.items.len % 2 == 1) continue;
 
             std.sort.heap(vec1z, intersections.items, {}, struct {
                 pub fn lessThan(_: void, a: vec1z, b: vec1z) bool {
@@ -732,14 +733,14 @@ pub fn main() !void {
     // Initialize shared state
     var state = inputs.InputState.init();
 
-    // Spawn input reading thread
+    // Spawn input reading threads
     const kbd_thread = try std.Thread.spawn(.{}, inputs.read_keyboard_input_thread, .{&state});
     defer kbd_thread.join();
     const mouse_thread = try std.Thread.spawn(.{}, inputs.read_mouse_input_thread, .{&state});
     defer mouse_thread.join();
 
     std.debug.print("Exiting...\n", .{});
-    const floor = try Floor.init(2, 1, 1, .{ .x = -5, .y = 1, .z = 0 }, allocator);
+    const floor = try Floor.init(2, 5, 5, .{ .x = -5, .y = 1, .z = 0 }, allocator);
     var cube = try Cube.init(0.7, .{ .x = 0, .y = 0, .z = 3 }, allocator);
 
     var itteration: u64 = 0;
@@ -787,7 +788,7 @@ pub fn main() !void {
             try screen.draw_surface(v.verts.items, v.color);
         }
         //for (vert_order.items) |*v| {
-        //    try screen.draw_lines(v.verts.items, AtomColor.WHITE);
+        //    try screen.draw_lines(v.verts.items, AtomColor.BLACK);
         //}
         const t_draw = std.time.microTimestamp() - t;
 
@@ -840,11 +841,12 @@ pub fn main() !void {
         const t_frame = std.time.microTimestamp() - t;
         std.debug.print("itteration time {}\n", .{t_frame});
 
-        //for (&cube.faces) |*poly| {
-        //    const verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
+        //for (floor.faces.items) |*poly| {
+        //    var verts = try poly.*.projection(world.translation, world.pitch, world.yaw, allocator);
         //    for (verts.items) |*vert| {
         //        std.debug.print("({},{},{})\n", .{ vert.x, vert.y, vert.z });
         //    }
+        //    verts.deinit(allocator);
         //}
         if (t_loop > 20_000) return;
 
